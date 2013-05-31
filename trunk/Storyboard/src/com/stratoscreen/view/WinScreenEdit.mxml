@@ -1,0 +1,494 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" title="Edit Screen"
+			   width="640" height="306" creationComplete="creationCompleteHandler(event)" close="closeHandler(event)" >
+	<s:layout>
+		<s:HorizontalLayout paddingTop="10" paddingBottom="10" paddingLeft="10" paddingRight="10"/>
+	</s:layout>
+	<fx:Declarations>
+		<mx:StringValidator id="validName" source="{txtName}" property="text" />
+		<mx:ZipCodeValidator id="validZip" source="{txtZip}" property="text" />
+	</fx:Declarations>	
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.aws.SESEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Screens;
+			import com.stratoscreen.model.views.CountRows;
+			import com.stratoscreen.resources.*;
+			import com.stratoscreen.utils.DateUtils;
+			import com.stratoscreen.utils.LogUtils;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+
+			private const STATES:Array = new Array ( {value: "AK", label: "Alaska"}, {value: "AL", label: "Alabama"}, {value: "AR", label: "Arkansas"}, {value: "AZ", label: "Arizona"}, {value: "CA", label: "California"}, {value: "CO", label: "Colorado"}, {value: "CT", label: "Connecticut"}, {value: "DE", label: "Delaware"}, {value: "DC", label: "District of Columbia"}, {value: "FL", label: "Florida"}, {value: "GA", label: "Georgia"}, {value: "HI", label: "Hawaii"}, {value: "IA", label: "Iowa"}, {value: "ID", label: "Idaho"}, {value: "IL", label: "Illinois"}, {value: "IN", label: "Indiana"}, {value: "KS", label: "Kansas"}, {value: "KY", label: "Kentucky"}, {value: "LA", label: "Louisiana"}, {value: "MA", label: "Massachusetts"}, {value: "MD", label: "Maryland"}, {value: "ME", label: "Maine"}, {value: "MI", label: "Michigan"}, {value: "MN", label: "Minnesota"}, {value: "MS", label: "Mississippi"}, {value: "MO", label: "Missouri"}, {value: "MT", label: "Montana"}, {value: "NC", label: "North Carolina"}, {value: "ND", label: "North Dakota"}, {value: "NE", label: "Nebraska"}, {value: "NH", label: "New Hampshire"}, {value: "NJ", label: "New Jersey"}, {value: "NM", label: "New Mexico"}, {value: "NV", label: "Nevada"}, {value: "NY", label: "New York"}, {value: "OH", label: "Ohio"}, {value: "OK", label: "Oklahoma"}, {value: "OR", label: "Oregon"}, {value: "PA", label: "Pennsylvania"}, {value: "RI", label: "Rhode Island"}, {value: "SC", label: "South Carolina"}, {value: "SD", label: "South Dakota"}, {value: "TN", label: "Tennessee"}, {value: "TX", label: "Texas"}, {value: "UT", label: "Utah"}, {value: "VA", label: "Virginia"}, {value: "VT", label: "Vermont"}, {value: "WA", label: "Washington"}, {value: "WI", label: "Wisconsin"}, {value: "WV", label: "West Virginia"}, {value: "WY", label: "Wyoming"} );
+			
+			[Bindable] private var _screen:Screens;
+			[Bindable] private var _pending:Boolean;
+			[Bindable] private var _isDirty:Boolean = false;
+			[Bindable] private var _states:ArrayCollection = new ArrayCollection(STATES); 
+			private var _appManager:AppManager;
+			private var _canceled:Boolean = true;
+			private var _subCode:String;
+			private var _newScreen:Boolean = false;
+
+			public function get screen_():Screens
+			{
+				return _screen;
+			}
+			
+			public function set screen_(value:Screens):void
+			{
+				if (value != null)
+				{
+					_screen =  Utils.copyClassObject(Screens, value);
+				}
+			}
+			
+			public function get canceled():Boolean
+			{
+				return _canceled;
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				_appManager = this.parentApplication.appManager;
+				_appManager.addEventListener(AppManager.APP_RESIZE, appResizeHandler);
+				_appManager.currentEditWindow = this;	
+				
+				// Create the screen object if needed
+				if (_screen == null)
+				{
+					_pending = true;
+					_newScreen = true;
+					_screen = new Screens();
+					_screen.accountId = _appManager.currentAccount.itemName;
+					_screen.type = Screens.TYPE_SCREEN;	// Single screen
+					_screen.viewMode = _appManager.currentAccount.defaultScreenView;
+					_screen.createdBy = _appManager.currentUser.itemName;
+					_screen.modifiedBy = _appManager.currentUser.itemName;					
+					_screen.state = _appManager.currentAccount.state;
+					_screen.zip = _appManager.currentAccount.zip;
+					_screen.code = "";
+					_screen.activatedDateUTC = (new Date(0)).toString();
+					_screen.detailLastUpdateUTC = (new Date(0)).toString();
+					this.enabled = false;
+					this.callLater(createSubCode);
+				}
+				else
+				{
+					// Do not allow the user to update most the fields if this
+					// is a stand alone player
+					if (_screen.device == Screens.DEVICE_STAND_ALONE)
+					{
+						_pending = false;
+						borderComm.enabled = false;
+					}
+					else
+					{
+						_pending = _screen.status == Screens.STATUS_PENDING;
+						_subCode = _screen.code;
+						setCodeLabel(); 
+					}
+					
+					chkUserControl.selected = _screen.userControl == "1";
+				}
+				
+				ddStates.selectedIndex = 0
+				for (var i:int = 0; i < ddStates.dataProvider.length; i++)
+				{
+					if (ddStates.dataProvider[i].value == _screen.state)
+					{
+						ddStates.selectedIndex = i;
+						break;
+					}
+				}
+				
+				for (i = 0; i < ddView.dataProvider.length; i++)
+				{
+					if (ddView.dataProvider[i].value == _screen.viewMode)
+					{
+						ddView.selectedIndex = i;
+						break;
+					}
+				}				
+
+				for (i = 0; i < ddUpdates.dataProvider.length; i++)
+				{
+					if (ddUpdates.dataProvider[i].value == _screen.updateFrequency)
+					{
+						ddUpdates.selectedIndex = i;
+						break;
+					}
+				}				
+
+				for (i = 0; i < ddPing.dataProvider.length; i++)
+				{
+					if (ddPing.dataProvider[i].value == _screen.pingFrequency)
+					{
+						ddPing.selectedIndex = i;
+						break;
+					}
+				}				
+			}
+			
+						
+			private function appResizeHandler(event:Event):void
+			{
+				this.width = this.parentApplication.width * Constants.EDIT_WINDOW_SIZE;
+				this.height = this.parentApplication.height * Constants.EDIT_WINDOW_SIZE;
+				
+				PopUpManager.centerPopUp(this);
+			}
+			
+			protected function closeHandler(event:CloseEvent):void
+			{
+				var closeWindow:Boolean;
+				
+				if (event == null)
+				{
+					// This was called directly from the program
+					closeWindow = true;
+					
+					// Broadcast a new event. The parent will be listening
+					if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE, false, false, Alert.YES));}
+				}
+				else  
+				{
+					switch (CloseEvent(event).detail)
+					{
+						case Alert.NO:
+							closeWindow = false;
+							break;
+						
+						case Alert.OK:
+						case Alert.YES:
+							closeWindow = true;
+							break;
+						
+						default:
+							closeWindow = !_isDirty
+							if (_isDirty) {Alert.show("Do you want to close window?", "Close Window", Alert.YES | Alert.NO, null, closeHandler, null, Alert.NO);}
+					}
+				}
+				
+				if (closeWindow) {PopUpManager.removePopUp(this);}				
+			}
+
+			private function validFields():Boolean
+			{
+				var message:String = "";
+				txtUpdateTime.errorString = "";
+				
+				var result:ValidationResultEvent = validName.validate();
+				if (result.results != null)  {message = result.message;}
+
+				result = validZip.validate();
+				if (result.results != null)   {message = result.message;}
+				
+				// Check for a valid time
+				txtUpdateTime.text = StringUtil.trim(txtUpdateTime.text);
+				if (ddUpdates.selectedItem.value == Screens.UPDATE_DAILY)
+				{
+					if (!DateUtils.isTime(txtUpdateTime.text))
+					{
+						message = "Invalid Time";
+						txtUpdateTime.errorString = message;
+					}
+				}
+
+				if (message != "")
+				{
+					Alert.show(message, "Invalid Data");
+					return false;
+				}
+				
+				return true;
+			}
+			
+			private function createSubCode():void
+			{
+				createSubCodeProcess();
+			}
+						
+			private function createSubCodeProcess(event:SDBEvent = null):void
+			{
+				var createCode:Boolean = true;
+				
+				if (event != null)
+				{
+					if (!event.success)
+					{
+						this.enabled = true;
+						Alert.show("Could not verify activation code. Please try again later", "Query Error");
+						return;
+					}
+					
+					// We have a result. Check to see if we a match
+					var count:int = parseInt(event.result[0].Count);
+					createCode = count > 0;					
+				}
+				
+				
+				if (createCode)
+				{
+					_subCode = Utils.randomEasyReadString(Screens.ACTIVATION_CODE_LENGTH);
+					
+					var sql:String = "Select count(*) from Screens where accountId = '" + _appManager.currentAccount.itemName + "' "
+					sql +=	"and code='" + _subCode + "'";
+					_appManager.sdb.select(sql, createSubCodeProcess, CountRows);
+				}
+				else
+				{
+					_screen.code = _subCode;
+					setCodeLabel(); 
+				}				
+			}
+						
+			private function setCodeLabel():void
+			{
+				this.enabled = true;
+				lblCode.text = _appManager.currentAccount.bucket.toUpperCase() + "-";
+				lblCode.text += _subCode;
+			}
+			
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				
+				// Check to see if the user already has a stand alone player
+				// We only allow 1
+				this.enabled = false;
+				/*
+				if (_newScreen && ddDevices.selectedItem.value == Screens.DEVICE_STAND_ALONE)
+				{
+					var sql:String = "Select count(*) from Screens where accountId = '" + _appManager.currentAccount.itemName + "' "
+					sql +=	"and device='" + Screens.DEVICE_STAND_ALONE + "'";
+					_appManager.sdb.select(sql, queryStandAloneCount, CountRows);
+				}
+				else
+				{
+					saveData();
+				}
+				*/
+				
+				// Ignore above the screen type will be set from the player
+				saveData();
+			}
+			
+			private function queryStandAloneCount(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					this.enabled = true;
+					Alert.show("Could not query Screens table. Please try again later", "Query Error");
+					return;
+				}
+				
+				// We have a result. Check to see if we a match
+				if (parseInt(event.result[0].Count) > 0)
+				{
+					Alert.show("Only one stand alone screen is allowed", "Too many screens");
+					this.enabled = true;
+					return;
+				}					
+				
+				// It is OK to save
+				saveData();
+			}
+			
+			private function saveData():void
+			{
+				_screen.type = Screens.TYPE_SCREEN;
+				_screen.viewMode = ddView.selectedItem.value;
+				_screen.updateFrequency = ddUpdates.selectedItem.value;
+				_screen.pingFrequency = ddPing.selectedItem.value;
+				_screen.userControl = chkUserControl.selected ? "1" : "0";
+				
+				if (!validFields()) 
+				{
+					this.enabled = true;
+					return;
+				}
+				
+				if (_screen.device == Screens.DEVICE_STAND_ALONE) 
+				{
+					_screen.code = "";
+					_screen.status = Screens.STATUS_ACTIVE;
+					_screen.activated = "1";
+					_screen.activatedDate = new Date();					
+				}
+				
+				_screen.modifiedBy = _appManager.currentUser.itemName;
+				_screen.modifiedDate = new Date();
+				
+				_screen.updated = true;				
+				_appManager.sdb.updateDomain([_screen], updateScreenHandler);
+				
+				// Send an email of the activation code if new
+				if (_screen.device != Screens.DEVICE_STAND_ALONE)
+				{
+					if (_screen.status == Screens.STATUS_PENDING)
+					{
+						var emailBody:String = (new NewScreenEmail()).toString();
+						var pattern:RegExp = /\@@SCREENNAME@@/gi;
+						emailBody = emailBody.replace(pattern, _screen.name);
+						
+						pattern = /\@@LOCATION@@/gi;
+						emailBody = emailBody.replace(pattern, _screen.state + " " + _screen.zip);
+						
+						pattern = /\@@CODE@@/gi;
+						emailBody = emailBody.replace(pattern, lblCode.text);
+						
+						var subject:String = "StratoScreen screen install code";
+						_appManager.ses.sendEmail(_appManager.currentUser.email, _appManager.currentAccount.email, subject, emailBody, true, emailHandler);
+					}
+				}
+			}
+			
+			private function emailHandler(event:SESEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("There was a problem sending the activation code email.\r\r Error: " + event.message, "Email Error");
+				}
+			}
+			
+			private function updateScreenHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not update the Screen. Please try again later", "Update Error");
+					this.enabled = true;
+					return;
+				}	
+				
+				// Close the window
+				_canceled = false;
+				_isDirty = false;
+				
+				// Remind the user that the changes are not automatic
+				if (!_pending && _screen.device != Screens.DEVICE_STAND_ALONE)
+				{
+					Alert.show("The screen has been updated.\r\n" +
+						       "Please note. Any view mode, communication, or report changes " +
+							   "may take up to 24 hours to take affect.\r\n" +
+							   "To update the screen immediately modify the screen's schedule and click 'Update Screen Now'.", "Update Successful");
+				}
+				
+				closeHandler(null);
+			}
+
+			
+			protected function btnNewCode_clickHandler(event:MouseEvent):void
+			{
+				lblCode.text = "";
+				createSubCode();
+			}
+
+		]]>
+	</fx:Script>
+	
+	<s:VGroup>
+		<s:BorderContainer width="305" height="172" styleName="Main">
+			<s:Label x="10" y="10" text="Screen Settings" fontWeight="bold" fontSize="11"/>
+			
+			<s:Label x="15" y="27" text="Name" height="20" fontWeight="bold"/>
+			<s:TextInput y="27" id="txtName" text="@{_screen.name}" change="{_isDirty = true}" left="113" width="180"/>
+			<!--
+			<s:Label x="15" y="55" text="Device Type" height="20" fontWeight="bold"/>
+			<s:DropDownList x="113" y="55" id="ddDevices" width="179" enabled="{_pending}">
+			<s:dataProvider>
+			<s:ArrayCollection>
+			<fx:Object label="Connected to PC" value="{Screens.DEVICE_PC}" />
+			<fx:Object label="Samsung TV" value="{Screens.TYPE_SAMSUNG_TV}" />
+			<fx:Object label="Samsung Blu Ray Player" value="{Screens.TYPE_SAMSUNG_BLU_RAY}" />
+			<fx:Object label="Stand alone player" value="{Screens.DEVICE_STAND_ALONE}" />
+			</s:ArrayCollection>
+			</s:dataProvider>
+			</s:DropDownList>
+			-->
+			<s:Label x="15" y="55" text="State" height="20" fontWeight="bold"/>
+			<s:DropDownList x="113" y="55" width="179" id="ddStates" dataProvider="{_states}" />
+			<s:Label x="15" y="83" text="Zip" height="20" fontWeight="bold"/>
+			<s:TextInput maxChars="10" id="txtZip" y="83" restrict="0-9\-" width="100" x="113" change="{_isDirty = true}" text="@{_screen.zip}"/>
+			<s:Label x="15" y="112" text="View Mode" height="20" fontWeight="bold"/>
+			<s:DropDownList id="ddView" x="113" y="111" change="{_isDirty = true}">
+				<s:dataProvider>
+					<s:ArrayCollection>
+						<fx:Object label="Stretch to fit" value="{Constants.VIEW_STRETCH}" />
+						<fx:Object label="Letterbox" value="{Constants.VIEW_LETTERBOX}" />
+						<fx:Object label="Full" value="{Constants.VIEW_FULL}" />
+					</s:ArrayCollection>
+				</s:dataProvider>
+			</s:DropDownList>
+			
+			<s:HGroup id="boxCode" x="15" y="141"  verticalAlign="middle" gap="0" >
+				<s:Label height="20" text="Activation Code" fontWeight="bold" visible="{_pending}"   width="98"/>
+				<s:Label id="lblCode" visible="{_pending}" text="ABCDE-ABCDE"  styleName="ActivateCode" />
+				<mx:Spacer width="5" />
+				<s:Button label="New Code" id="btnNewCode" click="btnNewCode_clickHandler(event)" height="18" fontSize="9" visible="{_pending}" />			
+			</s:HGroup>
+		</s:BorderContainer>
+	</s:VGroup>
+	
+	<s:VGroup height="100%">
+		<s:BorderContainer width="309" height="123" styleName="Main" id="borderComm" >
+			<s:Label x="10" y="10" text="Communication Settings" fontWeight="bold" fontSize="11"/>
+			<s:Label x="15" y="27" text="Check for Updates" height="20" fontWeight="bold"/>
+			<s:DropDownList id="ddUpdates" x="135" y="29" width="150">
+				<s:dataProvider>
+					<s:ArrayCollection>
+						<fx:Object label="Daily" value="{Screens.UPDATE_DAILY}" />
+						<!--
+						<fx:Object label="Hourly" value="{Screens.UPDATE_HOURLY}" />
+						<fx:Object label="Per Loop" value="{Screens.UPDATE_PER_LOOP}" />
+						-->
+					</s:ArrayCollection>
+				</s:dataProvider>
+			</s:DropDownList>
+			<s:Label x="15" y="52" text="Update Time" height="20" fontWeight="bold" enabled="{ddUpdates.selectedItem.value == Screens.UPDATE_DAILY}"/>
+			<s:TextInput x="135" y="58" width="100" restrict="0-9\:\ apmAPM" id="txtUpdateTime" text="@{_screen.updateTime}" enabled="{ddUpdates.selectedItem.value == Screens.UPDATE_DAILY}"/>
+			<s:Label x="15" y="80" text="Ping" height="20" fontWeight="bold"/>
+			<s:DropDownList id="ddPing" x="135" y="85" width="150">
+				<s:dataProvider>
+					<s:ArrayCollection>
+						<!--
+						<fx:Object label="On Media change" value="" />
+						-->
+						<fx:Object label="1 Minutes" value="1" />
+						<fx:Object label="5 Minutes" value="5" />
+						<fx:Object label="10 Minutes" value="5" />
+						<fx:Object label="15 Minutes" value="15" />
+					</s:ArrayCollection>
+				</s:dataProvider>
+			</s:DropDownList>		
+		</s:BorderContainer>
+
+		<s:BorderContainer width="309" height="72" styleName="Main" id="borderUser">
+			<s:Label x="10" y="10" text="User Control" fontWeight="bold" fontSize="11"/>
+			<s:CheckBox id="chkUserControl" x="15" y="27" label="Allow user to change channel"
+						fontStyle="normal" fontWeight="bold"/> 
+		</s:BorderContainer>
+
+		
+		<s:Spacer height="100%" />
+		<s:HGroup horizontalAlign="right" width="100%">
+			<s:Button label="Save"  id="btnSave" click="btnSave_clickHandler(event)"/>
+		</s:HGroup>
+	</s:VGroup>
+		
+
+	<s:controlBarContent>	
+	</s:controlBarContent>
+</s:TitleWindow>

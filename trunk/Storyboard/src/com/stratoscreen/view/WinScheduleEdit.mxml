@@ -1,0 +1,956 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*" 
+			   minWidth="950" minHeight="620" title="Edit Schedule"
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.PlayTimes;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.Channels;
+			import com.stratoscreen.model.domains.Overlays;
+			import com.stratoscreen.model.domains.ScheduleDetail;
+			import com.stratoscreen.model.domains.Schedules;
+			import com.stratoscreen.model.domains.Screens;
+			import com.stratoscreen.model.requests.UpdateNow;
+			import com.stratoscreen.renderers.ChannelItem;
+			import com.stratoscreen.renderers.ChannelOverlayItem;
+			import com.stratoscreen.renderers.MediaThumbItem;
+			import com.stratoscreen.utils.DateUtils;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.utils.RequestUtils;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.CollectionEvent;
+			import mx.events.CollectionEventKind;
+			import mx.events.DataGridEvent;
+			import mx.events.DragEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ListEvent;
+			import mx.managers.DragManager;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+			
+			private const HEIGHT_PLAYTIMES:int = 48;
+			private const HEIGHT_PLAYTIMES_CUSTOM:int = 104;
+			private const HEIGHT_PLAYDATES:int = 48;
+			private const HEIGHT_PLAYDATES_CUSTOM:int = 104;
+			private const HEIGHT_PLAYDAYS:int = 48;
+			private const HEIGHT_PLAYDAYS_CUSTOM:int = 195;
+			private const HEIGHT_GAP:int = 6;
+
+			[Bindable] private var _screen:Screens;
+			[Bindable] private var _channels:ArrayCollection;
+			[Bindable] private var _overlays:ArrayCollection;
+			[Bindable] private var _details:ArrayCollection;
+			[Bindable] private var _selectedItem:ScheduleDetail;
+			[Bindable] private var _playTimes:ArrayCollection;		
+			[Bindable] private var _isDirty:Boolean = false;
+			private var _schedule:Schedules;
+			private var _newSchedule:Boolean = false;
+			private var _appManager:AppManager;
+			private var _point:Point;
+			private var _channelsLoaded:Boolean = false;
+			private var _overlaysLoaded:Boolean = false;
+			private var _scheduleLoaded:Boolean = false;
+			private var _scheduleDetailLoaded:Boolean = false;	
+			
+			public function set screen_(value:Screens):void
+			{
+				_screen = value;
+			}
+			
+			public function addChannelItem(channel:Channels):void
+			{
+				_details.addItem(channel);
+				_isDirty = true;
+			}
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				_appManager = this.parentApplication.appManager;
+				_appManager.addEventListener(AppManager.APP_RESIZE, appResizeHandler);
+				_appManager.currentEditWindow = this;
+				borderThumb.visible = false;
+				groupRight.visible = false;
+				btnSort.addEventListener(TextSortButton.CLICKED, sortButtonHandler);
+				searchBox.addEventListener(SearchBox.SEARCH_SEARCH, searchHandler);
+				searchBox.addEventListener(SearchBox.SEARCH_CLEARED, searchHandler);
+				
+				listChannels.scroller.setStyle("horizontalScrollPolicy", "off");
+				
+				var sql:String = "Select * from Schedules where itemName()='" + _screen.itemName + "'";
+				_appManager.sdb.select(sql, loadLineUpHandler, Schedules);
+
+				sql = "Select * from ScheduleDetail where scheduleId='" + _screen.itemName + "'" ;
+				sql += " and priority is not null order by priority";
+				_appManager.sdb.select(sql, loadLineUpDetailHandler, ScheduleDetail);
+
+				sql = "Select * from Channels where accountId='";
+				sql += _appManager.currentUser.accountId + "'";
+				_appManager.sdb.select(sql, loadChannelsHandler, Channels);
+
+				sql = "Select * from Overlays where accountId='";
+				sql += _appManager.currentUser.accountId + "' and type='" + Overlays.TYPE_CHANNEL + "'";
+				_appManager.sdb.select(sql, loadOverlaysHandler, Overlays);
+
+				chkUpdateNow.visible = _screen.device != Screens.DEVICE_STAND_ALONE;
+				this.addEventListener(MouseEvent.MOUSE_MOVE, mouseMoveListener);
+				this.enabled = false;				
+			}
+
+			private function appResizeHandler(event:Event):void
+			{
+				this.width = this.parentApplication.width * Constants.EDIT_WINDOW_SIZE;
+				this.height = this.parentApplication.height * Constants.EDIT_WINDOW_SIZE;
+				
+				PopUpManager.centerPopUp(this);
+			}
+			
+			private function loadLineUpHandler(event:SDBEvent):void
+			{
+				_scheduleLoaded = true;
+				this.enabled = _channelsLoaded && _overlaysLoaded &&  _scheduleLoaded && _scheduleDetailLoaded;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not TV Line Up. Please try again later", "Load Error");
+					this.enabled = true;
+					return;
+				}
+				
+				// Is the the first time the line up has been created
+				if (event.result.length == 0)
+				{
+					_newSchedule = true;
+					_schedule = new Schedules();
+					_schedule.itemName = _screen.itemName;
+					_schedule.accountId = _appManager.currentAccount.itemName;
+					_schedule.createdBy = _appManager.currentUser.itemName;
+					
+					setupDetailsArray();
+				}
+				else
+				{
+					// Expect one row
+					_schedule = event.result[0];
+				}
+			}
+			
+			private function setupDetailsArray():void
+			{
+				_details = new ArrayCollection();
+				_details.filterFunction = filterDeleted;	// Hide the deleted items but pass to the server for deletion
+				_details.addEventListener(CollectionEvent.COLLECTION_CHANGE, scheduleChangeHandler);								
+			}
+						
+			private function loadLineUpDetailHandler(event:SDBEvent):void
+			{
+				_scheduleDetailLoaded = true;
+				this.enabled = _channelsLoaded && _overlaysLoaded &&  _scheduleLoaded && _scheduleDetailLoaded;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not TV Line Up detail. Please try again later", "Load Error");
+					this.enabled = true;
+					return;
+				}
+				
+				// No need to continue if this is new
+				if (_newSchedule) {return;}
+									
+				setupDetailsArray();
+				
+				// Remember we have two different types in the detail
+				var details:Array = event.result as Array;
+				for each (var item:ScheduleDetail in details)
+				{
+					_details.addItem(item);
+				}
+				
+				_isDirty = false;
+			}
+			
+			private function loadChannelsHandler(event:SDBEvent):void
+			{
+				_channelsLoaded = true;
+				this.enabled = _channelsLoaded && _overlaysLoaded &&  _scheduleLoaded && _scheduleDetailLoaded;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not load Channels. Please try again later", "Load Error");
+					return;
+				}
+				
+				_channels = new ArrayCollection();
+				_channels.source = event.result as Array;	
+				_channels.filterFunction = filterSearch;
+				
+				// Default to a sort by name
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name", true)];				
+				_channels.sort = sort;
+				_channels.refresh();		
+			}
+			
+			private function loadOverlaysHandler(event:SDBEvent):void
+			{
+				_overlaysLoaded = true;
+				this.enabled = _channelsLoaded && _overlaysLoaded &&  _scheduleLoaded && _scheduleDetailLoaded;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not load Overlays. Please try again later", "Load Error");
+					return;
+				}
+				
+				_overlays = new ArrayCollection();
+				_overlays.source = event.result as Array;	
+				_overlays.filterFunction = filterSearch;
+				
+				// Default to a sort by name
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name", true)];				
+				_overlays.sort = sort;
+				_overlays.refresh();						
+			}
+
+			private function scheduleChangeHandler(event:CollectionEvent):void
+			{
+				if (event.kind == CollectionEventKind.ADD || event.kind == CollectionEventKind.REMOVE)
+				{
+					// Convert the Objects to ChannelDetail if needed
+					this.callLater(convertToChannelObjects);
+				}
+			}
+			
+			private function convertToChannelObjects():void
+			{
+				var detailArray:ArrayCollection;				
+				detailArray = _details;
+				
+				for (var i:int = 0; i < detailArray.length; i++)
+				{
+					if (!(detailArray[i] is ScheduleDetail))
+					{
+						var detail:ScheduleDetail = new ScheduleDetail();
+						detail.name = detailArray[i].name;
+						detail.accountId = _appManager.currentAccount.itemName;
+						detail.scheduleId = _screen.itemName;	
+						detail.itemId = detailArray[i].itemName;
+						detail.firstMediaId = detailArray[i].firstMediaId;
+						detail.createdBy = _appManager.currentUser.itemName;
+						detail.priority = "000";	// This will be set later
+							
+						// Replace the object with the corrected ChannelDetail Object
+						detailArray.addItemAt(detail, i);
+						detailArray.removeItemAt(i + 1);
+						return;	// The detailChangeHandler function will recall this function until the array is clean													
+					}
+				}
+			}
+			
+			public function itemClick(id:String):void
+			{
+				updateSelectedItem();	// Write the pending data to the object
+
+				// Find the matching item
+				for (var i:int = 0; i < _details.length; i++)
+				{
+					if (_details[i].itemId == id)
+					{
+						_selectedItem = _details[i];
+						setSelectedItem();		// Update the edit panels for the new selection
+					}
+				}
+			}
+			
+			public function removeItem(id:String):void
+			{
+				// Find the matching item
+				for (var i:int = 0; i < _details.length; i++)
+				{
+					if (_details[i].itemName == id)
+					{
+						_details[i].deleted = true;
+						groupRight.visible = false;
+						_isDirty = true;
+						break;
+					}
+				}
+
+				_details.refresh();
+			}
+			
+			private function mouseMoveListener(event:MouseEvent):void
+			{
+				_point = new Point(event.stageX , event.stageY);	// Fix hard coding
+			}
+			
+			protected function closeHandler(event:Event):void
+			{
+				var closeWindow:Boolean;
+				
+				if (event == null)
+				{
+					// This was called directly from the program
+					closeWindow = true;
+					
+					// Broadcast a new event. The parent will be listening
+					if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE, false, false, Alert.YES));}
+				}
+				else  
+				{
+					switch (CloseEvent(event).detail)
+					{
+						case Alert.NO:
+							closeWindow = false;
+							break;
+						
+						case Alert.YES:
+							closeWindow = true;
+							break;
+						
+						default:
+							closeWindow = !_isDirty
+							if (_isDirty) {Alert.show("Do you want to close window?", "Close Window", Alert.YES | Alert.NO, null, closeHandler, null, Alert.NO);}
+					}
+				}
+				
+				if (closeWindow) {PopUpManager.removePopUp(this);}				
+			}
+			
+			public function showImage(value:Object):void
+			{
+				var bmpData:BitmapData = value.thumbBmpdata;
+				if (bmpData == null) {return;}
+				if (_point == null) {return;}	// hmmm. WOnder why this happened
+				
+				
+				// If the image is bigger than the zie alloted then skip the magnified view
+				if (bmpData.height <= 18 && bmpData.width <=30)	// Fix hard code
+				{
+					return;
+				}
+				
+				var rect:ResizeRectangle = ImageUtils.reSizetoMax(bmpData.width, bmpData.height);
+				imgThumb.source = new Bitmap(bmpData);
+				imgThumb.width = rect.width;
+				imgThumb.height = rect.height;
+				borderThumb.x = _point.x;
+				borderThumb.y = _point.y;
+				borderThumb.visible = true;
+				
+				// We have to guess what side is being moused over. 
+				// We want the images to the left of the grid if on the right
+				borderThumb.y -= 60;	// Fix the hard code
+				if (borderThumb.x < groupLeft.width)
+				{
+					borderThumb.x = 50; 	// Fix hardcoding
+				}
+				else
+				{
+					borderThumb.x = groupRight.x -  rect.width;
+				}
+				
+			}
+			
+			public function hideImage():void
+			{
+				borderThumb.visible = false;
+			}
+			
+			private function filterDeleted(item:Object):Boolean
+			{
+				return !item.deleted;
+			}
+			
+			protected function listGroup_dragDropHandler(event:DragEvent):void
+			{
+				_isDirty = true;
+			}		
+			
+			protected function listOverlays_dragDropHandler(event:DragEvent):void
+			{
+				_isDirty = true;
+			}	
+			
+			private function updateSelectedItem():void
+			{
+				if  (_selectedItem == null) {return;}
+				
+				
+				if (chkPlayTimes.selected)
+				{
+					_selectedItem.playTimes = "";
+				}
+				else
+				{
+					_selectedItem.playTimesArray = _playTimes.source;
+				}
+				
+				if (chkPlayDates.selected)
+				{
+					_selectedItem.startDateString = "";
+					_selectedItem.endDateString = "";					
+				}
+				else
+				{
+					_selectedItem.startDateString = dateStart.selectedDate == null ? "" : dateStart.selectedDate.toUTCString();
+					_selectedItem.endDateString = dateEnd.selectedDate == null ? "" : dateEnd.selectedDate.toUTCString();
+				}
+				
+				if (chkPlayDays.selected)
+				{
+					_selectedItem.daysOfWeek = ScheduleDetail.DEFAULT_DAYS_OF_WEEK;
+				}
+				else
+				{
+					var daysOfWeek:String = "";
+					daysOfWeek += chkSunday.selected ? "1" : "0";
+					daysOfWeek += chkMonday.selected ? "1" : "0";
+					daysOfWeek += chkTuesday.selected ? "1" : "0";
+					daysOfWeek += chkWednesday.selected ? "1" : "0";
+					daysOfWeek += chkThursday.selected ? "1" : "0";
+					daysOfWeek += chkFriday.selected ? "1" : "0";
+					daysOfWeek += chkSaturday.selected ? "1" : "0";
+					
+					_selectedItem.daysOfWeek = daysOfWeek;
+				}
+			}	
+			
+			private function setSelectedItem():void
+			{
+				groupRight.visible = true;
+				
+				lblSelectedType.text = "Selected Channel";
+				stepOrder.maximum = _details.length + 1;
+				stepOrder.value = getSelectedItemOrder() + 1;
+				
+				// Set up the playtimes for the current item
+				_playTimes = new ArrayCollection(_selectedItem.playTimesArray);
+				_playTimes.filterFunction = filterDeleted;
+				
+				// Flip the blankRow flag or this will not save property
+				for each (var playTime:PlayTimes in _playTimes)
+				{
+					if ( StringUtil.trim(playTime.startTime) == "" && StringUtil.trim(playTime.endTime) == "")
+					{
+						playTime.blankRow = true;
+					}
+					else
+					{
+						playTime.blankRow = false;
+					}
+				}
+				
+				if (_playTimes.length == 0)	
+				{
+					chkPlayTimes.selected = true;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES;
+					gridTimes.visible = false;
+				}
+				else
+				{
+					chkPlayTimes.selected = false;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES_CUSTOM;
+					gridTimes.visible = true;
+					
+				}			
+				addBlankRow();				
+				
+				if (_selectedItem.startDateString == "" && _selectedItem.endDateString == "")
+				{
+					chkPlayDates.selected = true;
+					borderPlayDates.height = HEIGHT_PLAYDATES;
+				}
+				else
+				{
+					chkPlayDates.selected = false;
+					dateStart.selectedDate = _selectedItem.startDateString == "" ? null : _selectedItem.startDate;
+					dateEnd.selectedDate = _selectedItem.endDateString == "" ? null : _selectedItem.endDate;
+					borderPlayDates.height = HEIGHT_PLAYDATES_CUSTOM;
+				}
+				
+				if (_selectedItem.daysOfWeek == ScheduleDetail.DEFAULT_DAYS_OF_WEEK)
+				{
+					chkPlayDays.selected = true;
+					borderPlayDays.height = HEIGHT_PLAYDAYS;										
+				}
+				else
+				{
+					chkPlayDays.selected = false;
+					borderPlayDays.height = HEIGHT_PLAYDAYS_CUSTOM;
+				}
+				
+				// Set the checkboxes based on the string
+				for (var i:int = 0; i < _selectedItem.daysOfWeek.length; i++)
+				{
+					var chkBox:CheckBox
+					switch (i)
+					{
+						case 0:
+							chkBox = chkSunday;
+							break;
+						case 1:
+							chkBox = chkMonday;
+							break;
+						case 2:
+							chkBox = chkTuesday;
+							break;						
+						case 3:
+							chkBox = chkWednesday;
+							break;
+						case 4:
+							chkBox = chkThursday;
+							break;				
+						case 5:
+							chkBox = chkFriday;
+							break;				
+						case 6:
+							chkBox = chkSaturday;
+							break;						
+					}					
+					chkBox.selected = _selectedItem.daysOfWeek.charAt(i) == "1";
+				}
+			}
+			
+			
+			protected function stepOrder_changeHandler(event:Event):void
+			{
+				var detailArray:ArrayCollection;				
+				detailArray = _details;
+
+				if (stepOrder.value > detailArray.length) 
+				{
+					stepOrder.value = detailArray.length;
+					return;
+				}
+				
+				// remove from the details and readd
+				var beforeIndex:int;
+				for (var i:int = 0; i < detailArray.length; i++)
+				{
+					if (detailArray[i].itemName == _selectedItem.itemName)	
+					{
+						beforeIndex = i;
+						detailArray.removeItemAt(i);
+					}
+				}
+				
+				// Allow the system to perform the remove
+				var afterIndex:int = stepOrder.value - 1;
+				this.callLater(reAddItem, [afterIndex]);
+			}
+			
+			private function reAddItem(index:int):void
+			{
+				var detailArray:ArrayCollection;				
+				detailArray = _details;
+				
+				detailArray.addItemAt(_selectedItem, index);
+				_isDirty = true;
+			}			
+			
+			private function getSelectedItemOrder():int
+			{
+				var detailArray:ArrayCollection;				
+				detailArray = _details;
+
+				for (var i:int = 0; i < detailArray.length; i++)
+				{
+					if (detailArray[i].itemName == _selectedItem.itemName)	{return i;}
+				}					
+				
+				return -1;
+			}	
+			
+			protected function chkPlayTimes_clickHandler(event:MouseEvent):void
+			{
+				_isDirty = true;
+				if (chkPlayTimes.selected)
+				{
+					gridTimes.visible = false;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES;
+				}
+				else
+				{
+					gridTimes.visible = true;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES_CUSTOM;					
+				}			
+			}
+			
+			protected function gridTimes_itemClickHandler(event:ListEvent):void
+			{
+				gridTimes.errorString = "";						
+				
+				// The update or delete was clicked
+				if (event.columnIndex == 2)
+				{
+					var playTime:PlayTimes = event.itemRenderer.data as PlayTimes;
+					
+					if (!playTime.blankRow)
+					{
+						_isDirty = true;
+						playTime.deleted = true;
+						_playTimes.refresh();
+					}					
+				}
+				
+				// Make sure we have a row we an edit
+				addBlankRow();
+			}
+			
+			protected function gridTimes_itemEditEndHandler(event:DataGridEvent):void
+			{				
+				_isDirty = true;
+				event.itemRenderer.data.blankRow = false;
+				addBlankRow();
+			}	
+			
+			private function addBlankRow():void
+			{
+				// We may need to add a new row to the collection.
+				var blankRowFound:Boolean = false;
+				for each(var playTime:PlayTimes in _playTimes)
+				{
+					if ( StringUtil.trim(playTime.startTime) == "" && StringUtil.trim(playTime.endTime) == "")
+					{
+						playTime.blankRow = true;
+						blankRowFound = true;
+						break;
+					}
+				}
+				
+				if (!blankRowFound) {_playTimes.addItemAt(new PlayTimes(), _playTimes.length );}
+			}
+
+			protected function chkPlayDates_clickHandler(event:MouseEvent):void
+			{
+				_isDirty = true;
+				if (chkPlayDates.selected)
+				{
+					borderPlayDates.height = HEIGHT_PLAYDATES;										
+				}
+				else
+				{
+					borderPlayDates.height = HEIGHT_PLAYDATES_CUSTOM;
+				}
+			}
+
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				updateSelectedItem();	// Write the pending data to the object
+				
+				if (_details.length == 0)
+				{
+					Alert.show("At least one Channel must be added to the Line Up.", "Invalid Line Up");
+					return;
+				}
+				
+				// Loop through th channels and look for a valid entries
+				var detailArray:ArrayCollection = _details;
+
+				for each (var detail:ScheduleDetail in detailArray)
+				{
+					var title:String = "";
+					var message:String = "";
+					
+					if (detail.startDateString != "" && detail.endDateString != "")
+					{
+						if (detail.startDate > detail.endDate)
+						{
+							title = "Invalid Date Range";
+							message = "Start date must be less End date";
+						}						
+					}
+					
+					if (detail.daysOfWeek.indexOf("1") < 0 )
+					{
+						title = "Invalid Date Selection";
+						message = "At least one week day must be selected";				
+					}
+					
+					for each (var playTime:PlayTimes in detail.playTimesArray)
+					{
+						if ( StringUtil.trim(playTime.startTime) == "" && StringUtil.trim(playTime.endTime) == "")
+						{
+							// This is OK
+						}
+						else if ( StringUtil.trim(playTime.startTime) == "" || StringUtil.trim(playTime.endTime) == "")
+						{
+							// Adjust the time. Assume blank that it is the beginning
+							if (StringUtil.trim(playTime.startTime) == "") {playTime.startTime = "00:00:00";}	
+							if (StringUtil.trim(playTime.endTime) == "") {playTime.endTime = "23:59:59";}
+						}
+						else
+						{
+							// Validate what we have
+							if (!DateUtils.isTime(playTime.startTime) || !DateUtils.isTime(playTime.endTime))
+							{
+								title = "Invalid Time";
+								message = "Invalid time found";
+								break;
+							}
+							
+							if (!playTime.datesInSequence())
+							{
+								title = "Invalid Time Range";
+								message = "Invalid time time range";
+								break;									
+							}
+						}
+						
+					}
+
+					
+					if (message != "")
+					{
+						_selectedItem = detail;
+						setSelectedItem();
+						Alert.show(message, title);
+						return;
+					}					
+				}					
+								
+				saveData();
+			}
+			
+			private function saveData():void
+			{
+				// Save the Detail First. 
+				// We will haev to assemble a new array, because we have two different 
+				// types of data
+				var saveArray:Array = new Array();				
+				var i:int = 0;
+				for each(var detail:ScheduleDetail in _details.source)
+				{
+					detail.updated = !detail.deleted;	// Avoid switch both flags
+					detail.modifiedBy = _appManager.currentUser.itemName;
+					detail.modifiedDate = new Date();
+					detail.priority = Utils.zeroPad(i,3);
+					
+					saveArray.push(detail);					
+					i++;
+				}
+
+				this.enabled = false;
+				_appManager.sdb.updateDomain(saveArray, updateLineUpDetailHandler);
+			}
+			
+			private function updateLineUpDetailHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					this.enabled = true;
+					Alert.show("Could not update Line Up detail. Please try again later", "Update Error");
+					return;
+				}	
+								
+				// Update the parent line up now				
+				_schedule.modifiedBy = _appManager.currentUser.itemName;
+				_schedule.modifiedDate = new Date();
+				_appManager.sdb.updateDomain([_schedule], updateLineUpHandler);
+			}
+			
+			private function updateLineUpHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					this.enabled = true;
+					Alert.show("Could not update Line Up. Please try again later", "Update Error");
+					return;
+				}
+
+				// If we are forcing the update to happen, we need to update the screen
+				// record too				
+				if (chkUpdateNow.selected)
+				{
+					var updateNow:UpdateNow = new UpdateNow();
+					_screen.requestTask = RequestUtils.createJSON(updateNow);
+					_screen.requestTaskId = RequestUtils.generateId();
+					_screen.requestTaskDate = RequestUtils.generateDate();	// Use this to clear old requests
+					_screen.updated = true;
+					_appManager.sdb.updateDomain([_screen], updateScreenHandler);
+					return;	// Skip the final step
+				}
+				
+				completeUpdateProcess();
+			}
+			
+			private function updateScreenHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not update screen table. The screen may not update before the next schedule update.", "Update Error");
+				}
+				
+				completeUpdateProcess()
+			}
+			
+			private function completeUpdateProcess():void
+			{
+				this.enabled = true;
+				_isDirty = false;
+				closeHandler(null);				
+			}
+			
+			protected function chkPlayDays_clickHandler(event:MouseEvent):void
+			{
+				_isDirty = true;
+				if (chkPlayDays.selected)
+				{
+					borderPlayDays.height = HEIGHT_PLAYDAYS;										
+				}
+				else
+				{
+					borderPlayDays.height = HEIGHT_PLAYDAYS_CUSTOM;
+				}
+			}
+
+
+			protected function listGroup_dragEnterHandler(event:DragEvent):void
+			{
+				event.target.dropEnabled = event.dragInitiator == listChannels || event.dragInitiator == listGroup;
+			}
+
+
+			private function filterSearch(item:Object):Boolean
+			{
+				if (item.deleted) {return false;}
+				
+				var itemName:String = item.name.toLowerCase();
+				var searchText:String = searchBox.txtSearch.text.toLowerCase();
+				searchText = StringUtil.trim(searchText);
+				
+				return itemName.indexOf(searchText) >= 0;
+			}
+			
+			private function searchHandler(event:Event):void
+			{
+				if (_channels != null) {_channels.refresh();}
+				if (_overlays != null) {_overlays.refresh();}
+			}
+			
+			private function sortButtonHandler(event:Event):void
+			{
+				// Default to an alphabetic sort
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name",true, btnSort.selected)];
+				
+				if (_channels != null)
+				{
+					_channels.sort = sort;
+					_channels.refresh()
+				}
+				
+				if (_overlays != null)
+				{
+					_overlays.sort = sort;
+					_overlays.refresh()
+					
+				}
+			}
+		]]>
+	</fx:Script>
+	<s:VGroup id="groupLeft" width="230" left="5" top="5" bottom="5" horizontalAlign="center">
+		<s:BorderContainer styleName="Main" width="100%" height="35" dropShadowVisible="true">
+			<s:Label text="Screen Name" left="5" top="5" fontWeight="bold"/>
+			<s:Label y="18" right="5" id="lblTVName" text="{_screen.name}" left="10"/>			
+		</s:BorderContainer>
+		
+		<s:Line width="95%" >
+			<s:stroke>
+				<s:SolidColorStroke color="#3E63C1" weight="2" />
+			</s:stroke>				
+		</s:Line>
+		
+		<s:BorderContainer styleName="Main" width="100%" height="100%">
+			<components:SearchBox id="searchBox" right="30" top="20" left="5"/>
+			<components:TextSortButton top="20" right="5" id="btnSort"  toolTip="Sort media by name"/>
+			<s:List id="listChannels" dataProvider="{_channels}" itemRenderer="com.stratoscreen.renderers.DragChannelItem" 
+					dragEnabled="true" allowMultipleSelection="true" borderVisible="false" left="5" top="50" bottom="5" right="0">
+				<s:layout>
+					<s:VerticalLayout paddingLeft="0" paddingRight="5" paddingTop="0" paddingBottom="0" rowHeight="28" variableRowHeight="false" horizontalAlign="left" gap="2"/>
+				</s:layout>
+			</s:List>
+			<s:Label text="Channels" left="5" top="5" fontWeight="bold"/>
+		</s:BorderContainer>
+	</s:VGroup>
+	
+	<s:VGroup id="groupMiddle" left="242" top="5" bottom="5" right="213" >
+		<s:BorderContainer styleName="Main" width="100%" height="100%" minHeight="120" >
+			<s:Label text="Channels" left="5" top="5" fontWeight="bold"/>
+			<s:List id="listGroup" 
+					dragEnabled="true" dropEnabled="true" dragMoveEnabled="true" dragDrop="listGroup_dragDropHandler(event)" 
+					dataProvider="{_details}" itemRenderer="com.stratoscreen.renderers.ChannelItem" borderVisible="false" left="4" top="20" bottom="14" right="2" dragEnter="listGroup_dragEnterHandler(event)">
+				<s:layout>
+					<s:TileLayout orientation="rows"/>
+				</s:layout>
+			</s:List>							
+		</s:BorderContainer>
+	</s:VGroup>
+	
+	<s:VGroup id="groupRight" width="200" right="5" top="5" horizontalAlign="right" bottom="35">
+		<s:BorderContainer styleName="Main" width="100%" height="75" id="borderSelected">
+			<s:Label id="lblSelectedType" text="Selected Channel" fontWeight="bold" x="5" top="5"/>
+			<s:Label x="10" y="24" text="Name" fontWeight="normal"/>
+			<s:Label x="60" y="24" text="{_selectedItem.name}" width="135" maxDisplayedLines="1"/>
+			<s:Label x="10" y="41" text="Priority" fontWeight="normal" height="22"/>
+			<s:NumericStepper x="60" y="40" minimum="1" stepSize="1" id="stepOrder" change="stepOrder_changeHandler(event)"/>
+		</s:BorderContainer>
+		<s:BorderContainer styleName="Main" width="100%" height="104" id="borderPlayDates">
+			<s:Label text="Play Dates" fontWeight="bold" x="5" top="5"/>
+			<s:CheckBox x="10" y="24" label="Play any date" id="chkPlayDates" selected="true" click="chkPlayDates_clickHandler(event)"/>
+			<mx:DateField x="76" y="48" width="120" id="dateStart" visible="{!chkPlayDates.selected}" change="{_isDirty = true}"/>
+			<s:Label x="10" y="48" text="Start Date" fontWeight="normal" height="22" id="lblStartDate" visible="{!chkPlayDates.selected}"/>
+			<mx:DateField x="76" y="75" width="120" id="dateEnd" visible="{!chkPlayDates.selected}" change="{_isDirty = true}"/>
+			<s:Label x="10" y="75" text="End Date" fontWeight="normal" height="22" id="lblEndDate" visible="{!chkPlayDates.selected}"/>			
+		</s:BorderContainer>
+		<s:BorderContainer styleName="Main" width="100%" id="borderPlayDays" height="195">
+			<s:Label text="Play Days" fontWeight="bold" x="5" top="5"/>
+			<s:CheckBox x="10" y="24" label="Play any day" id="chkPlayDays" selected="true" click="chkPlayDays_clickHandler(event)"/>
+			<s:CheckBox x="15" y="52" label="Sunday" id="chkSunday" selected="true" fontStyle="normal" visible="{!chkPlayDays.selected}" click="{_isDirty = true}"/>
+			<s:CheckBox x="15" y="72" label="Monday" id="chkMonday" selected="true" fontStyle="normal" visible="{!chkPlayDays.selected}" click="{_isDirty = true}"/>
+			<s:CheckBox x="15" y="92" label="Tuesday" id="chkTuesday" selected="true" fontStyle="normal" visible="{!chkPlayDays.selected}" click="{_isDirty = true}"/>
+			<s:CheckBox x="15" y="112" label="Wednesday" id="chkWednesday" selected="true" fontStyle="normal" visible="{!chkPlayDays.selected}" click="{_isDirty = true}"/>
+			<s:CheckBox x="15" y="132" label="Thursday" id="chkThursday" selected="true" fontStyle="normal" visible="{!chkPlayDays.selected}" click="{_isDirty = true}"/>
+			<s:CheckBox x="15" y="152" label="Friday" id="chkFriday" selected="true" fontStyle="normal" visible="{!chkPlayDays.selected}" click="{_isDirty = true}"/>
+			<s:CheckBox x="15" y="172" label="Saturday" id="chkSaturday" selected="true" fontStyle="normal" visible="{!chkPlayDays.selected}" click="{_isDirty = true}"/>			
+		</s:BorderContainer>		
+		<s:BorderContainer styleName="Main" width="100%" id="borderPlayTimes" height="104">
+			<s:Label text="Play Times" fontWeight="bold" x="5" top="5"/>
+			<s:CheckBox x="10" y="24" label="Play any time" id="chkPlayTimes" selected="true" click="chkPlayTimes_clickHandler(event)"/>
+			<mx:DataGrid id="gridTimes" left="10" top="45" right="5" bottom="5" showHeaders="false" rowHeight="24"
+						 dataProvider="{_playTimes}" rowCount="{_playTimes.length}" editable="true"  
+						 itemEditEnd="gridTimes_itemEditEndHandler(event)" itemClick="gridTimes_itemClickHandler(event)" >
+				<mx:columns>
+					<mx:DataGridColumn dataField="startTime" />
+					<mx:DataGridColumn dataField="endTime" />
+					<mx:DataGridColumn itemRenderer="com.stratoscreen.renderers.UpdateRow" width="24" editable="false"/>
+				</mx:columns>
+			</mx:DataGrid>			
+		</s:BorderContainer>
+	</s:VGroup>	
+	<mx:HBox width="200"  right="5" bottom="5">
+		<s:CheckBox x="748" y="563" label="Update screen now" id="chkUpdateNow" click="{_isDirty = true}"/>
+		<mx:Spacer width="100%" />
+		<s:Button label="Save" id="btnSave" enabled="{_isDirty}" click="btnSave_clickHandler(event)"/>		
+	</mx:HBox>
+	
+	<s:BorderContainer id="borderThumb" dropShadowVisible="true" y="325" >
+		<mx:Image id="imgThumb" scaleContent="true" maintainAspectRatio="true" />	
+	</s:BorderContainer>
+
+	<s:controlBarContent />
+</s:TitleWindow>

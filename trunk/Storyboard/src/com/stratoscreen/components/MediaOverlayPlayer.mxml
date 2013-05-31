@@ -1,0 +1,409 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*"
+		 minHeight="135" minWidth="150" creationComplete="creationCompleteHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.Medias;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			import com.stratoscreen.model.domains.Overlays;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.utils.LogUtils;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.events.FlexEvent;
+			import mx.events.VideoEvent;
+			
+			import org.osmf.display.ScaleMode;
+			import org.osmf.events.MediaPlayerStateChangeEvent;
+			import org.osmf.media.MediaPlayerState;			
+			
+			[Bindable][Embed(source="/assets/icons/control_play_blue.png")]
+			private var iconPlay:Class;			
+			[Bindable][Embed(source="/assets/icons/control_stop_blue.png")]
+			private var iconStop:Class;
+			[Bindable][Embed(source="/assets/icons/arrow_out.png")]
+			private var iconZoom:Class;				
+
+			[Bindable] public var fullScreen:Boolean = false;
+			public var fullScreenBounds:Rectangle = null;
+			
+			private var _appManager:AppManager;
+			private var _awsEndpoint:AWSEndpoint;
+			private var _overlay:Overlays;
+			private var _overlayDetail:ArrayCollection;
+			private var _thumbLoaded:Boolean;
+			private var _detailLoaded:Boolean;
+			private var _baseMedia:Medias;
+			private var _canvasElements:Array;
+			private var _frameNumber:int;
+			private var _firstPlayState:Boolean;
+			private var _bufferPause:Boolean;
+			private var _timer:String;
+			private var _imageUtils:ImageUtils;
+			private var _viewMode:String = null;
+
+			public function get viewMode():String
+			{
+				return _viewMode;
+			}
+			
+			public function set viewMode(value:String):void
+			{
+				_viewMode = value;
+			}			
+
+			public function get mediaOverlay():Overlays
+			{
+				return _overlay;
+			}
+
+			public function set mediaOverlay(value:Overlays):void
+			{
+				if (value == null) {return;}
+				if (groupPreview == null) {return;} // STill rendering
+				
+				_overlay = value;
+				_thumbLoaded = false;
+				_detailLoaded = false;
+				this.enabled = false;
+				lblBuffering.visible = false;
+				
+				if (_viewMode == null) {_viewMode = _appManager.currentAccount.defaultScreenView;}
+				_imageUtils = new ImageUtils(_viewMode);
+				
+				// Load the thumbnail
+				var url:String;
+				url = "https://" + _awsEndpoint.s3 + "/" + _appManager.currentAccount.bucket;
+				url += "/" + Constants.THUMB_PREFIX + _overlay.baseMediaId + Constants.THUMB_EXTENSION;				
+				swfThumb.load(url);
+				
+				// Get the Overlay detail
+				var sql:String = "Select * from OverlayDetail where overlayId = '" + _overlay.itemName + "' ";
+				sql += "and z is not null order by z";
+				_appManager.sdb.select(sql, queryDetailHandler, OverlayDetail);
+			}
+
+			public function stop():void
+			{
+				btnStop_clickHandler(null);
+			}
+			
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				_awsEndpoint = AWSRegions.getAWSEndpoint(_appManager.regionId);
+				_imageUtils = new ImageUtils(_appManager.currentAccount.defaultScreenView);
+				
+				videoDisplay.addEventListener(mx.events.VideoEvent.COMPLETE, videoCompleteHandler);		
+				
+				this.mediaOverlay = _overlay;	// Draw the component
+			}
+			
+			private function queryDetailHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					LogUtils.writeToLog("Could not load detail for " + _overlay.itemName);
+					return;
+				}
+				
+				_overlayDetail = new ArrayCollection();
+				_overlayDetail.source = event.result as Array;
+				
+				setBaseAndSizes()
+				
+				_detailLoaded = true;
+				this.enabled = _thumbLoaded && _detailLoaded;				
+			}
+			
+			private function setBaseAndSizes():void
+			{
+				_baseMedia = _appManager.getMedia(_overlay.baseMediaId);
+				
+				var baseWidth:Number = parseFloat(_baseMedia.width);
+				var baseHeight:Number = parseFloat(_baseMedia.height);
+				var rect:ResizeRectangle= _imageUtils.getBestFit(baseWidth, baseHeight, groupPreview.width, groupPreview.height);
+				
+				swfBase.x = rect.x;
+				swfBase.y = rect.y;
+				swfBase.width = rect.width;
+				swfBase.height = rect.height;
+				canvas.x = rect.x;
+				canvas.y = rect.y;
+				canvas.width = baseWidth;
+				canvas.height = baseHeight;
+				canvas.scaleX = rect.scaleX;
+				canvas.scaleY = rect.scaleY;
+				videoDisplay.x = rect.x;
+				videoDisplay.y = rect.y;
+				videoDisplay.width = rect.width;
+				videoDisplay.height = rect.height;
+				videoDisplay.scaleMode = _viewMode == Constants.VIEW_LETTERBOX ?  ScaleMode.LETTERBOX : ScaleMode.STRETCH;				
+			}
+			
+			
+			protected function swfThumb_completeHandler(event:Event):void
+			{
+				// Manually center the image
+				var contentWidth:Number = event.target.content.width;
+				var contentHeight:Number = event.target.content.height;
+				
+				var rect:ResizeRectangle= _imageUtils.getBestFit(contentWidth, contentHeight, groupPreview.width, groupPreview.height, fullScreen);
+				swfThumb.x = rect.x;
+				swfThumb.y = rect.y;
+				swfThumb.width = rect.width;
+				swfThumb.height = rect.height;
+				
+				swfLoading.visible = false;
+				swfThumb.visible = true;
+				btnPlay.enabled = true;
+				btnStop.enabled = false;
+				_thumbLoaded = true;
+				this.enabled = _thumbLoaded && _detailLoaded;
+			}
+			
+			protected function swfThumb_ioErrorHandler(event:IOErrorEvent):void
+			{
+				swfThumb.visible = false;
+				btnPlay.enabled = true;
+				btnStop.enabled = false;
+
+				_thumbLoaded = true;
+				this.enabled = _thumbLoaded && _detailLoaded;				
+			}
+			
+			protected function swfBase_completeHandler(event:Event):void
+			{
+				addOverlayDetail();
+			}
+
+			protected function swfBase_enterFrameHandler(event:Event):void
+			{
+				if (_canvasElements == null) {return;}
+				
+				_frameNumber ++;
+				for (var i:int = 0; i < _canvasElements.length; i++)
+				{
+					_canvasElements[i].currentFrame = _frameNumber; 	// Assume the children has the currentFrame property
+				}
+			}
+
+			protected function videoDisplay_mediaPlayerStateChangeHandler(event:MediaPlayerStateChangeEvent):void
+			{
+				switch (event.state)
+				{
+					case MediaPlayerState.BUFFERING:
+						lblBuffering.visible = true;
+						
+						// Stop the timers on the detail if we pause
+						if (_canvasElements != null)
+						{
+							for (var i:int = 0; i < _canvasElements.length; i++)
+							{
+								_canvasElements[i].paused = true;
+								_bufferPause = true;
+							}							
+						}						
+						break;
+					
+					case MediaPlayerState.PLAYING:
+						lblBuffering.visible = false;
+						videoDisplay.visible = true;
+						swfThumb.visible = false;
+						swfLoading.visible = false;
+						
+						if (_firstPlayState)
+						{
+							addOverlayDetail();
+							_firstPlayState = false;
+						}
+						
+						// Restart the element timers if we are finished buffering
+						if (_bufferPause)
+						{
+							if (_canvasElements != null)
+							{
+								for (i= 0; i < _canvasElements.length; i++)
+								{
+									_canvasElements[i].paused = false;
+								}							
+							}	
+							_bufferPause = false;
+						}
+						
+						break;
+					
+					case MediaPlayerState.PLAYBACK_ERROR:
+						lblBuffering.visible = false;
+						videoDisplay.visible = false;
+						swfThumb.visible = true;
+						swfLoading.visible = false;
+						break;
+					
+					default:
+						lblBuffering.visible = false;
+				}
+			}
+
+			private function addOverlayDetail():void
+			{
+				_canvasElements = new Array();
+				_frameNumber = -1;	// We want to start at Zero on first loop
+				
+				for each (var detail:OverlayDetail in _overlayDetail)
+				{
+					switch (detail.type)
+					{
+						case OverlayDetail.TYPE_TEXT:
+							var text:OverlayDisplayText = new OverlayDisplayText();
+							text.overlayDetail = detail;
+							
+							text.text = detail.text;
+							text.x = parseFloat(detail.x);
+							text.y = parseFloat(detail.y);
+							text.width = parseFloat(detail.width);
+							text.height = parseFloat(detail.height);
+							text.rotation = parseFloat(detail.rotate);
+							text.alpha =  parseFloat(detail.alpha);
+							text.setStyle("color", "#" + detail.color);
+							text.setStyle("fontFamily", detail.fontFamily);
+							text.setStyle("fontSize", detail.fontSize);
+							text.setStyle("fontStyle", detail.fontStyle);
+							text.setStyle("fontWeight", detail.fontWeight);
+							text.setStyle("textDecoration", detail.textDecoration);
+							text.visible = false;	// The controll will set back to visible
+							text.filters = detail.filters;
+							
+							canvas.addElement(text);
+							_canvasElements.push(text);
+							break;
+						
+						case OverlayDetail.TYPE_MEDIA:
+							if (detail.isImage || detail.isSWF)
+							{
+								var swf:OverlayDisplaySWF = new OverlayDisplaySWF();
+								swf.overlayDetail = detail;
+								swf.x = parseFloat(detail.x);
+								swf.y = parseFloat(detail.y);
+								swf.width = parseFloat(detail.width);
+								swf.height = parseFloat(detail.height);
+								swf.rotation = parseFloat(detail.rotate);
+								swf.alpha =  parseFloat(detail.alpha);	
+								swf.filters = detail.filters;
+								
+								canvas.addElement(swf);
+								_canvasElements.push(swf);
+							}
+							else if (detail.isVideo)
+							{
+								var vid:OverlayDisplayVideo = new OverlayDisplayVideo()
+								vid.appManager = _appManager;	// Assign first 	
+								vid.overlayDetail = detail;
+								vid.x = parseFloat(detail.x);
+								vid.y = parseFloat(detail.y);
+								vid.width = parseFloat(detail.width);
+								vid.height = parseFloat(detail.height);
+								vid.rotation = parseFloat(detail.rotate);
+								vid.filters = detail.filters;
+								
+								canvas.addElement(vid);
+								_canvasElements.push(vid);								
+							}
+							else if (detail.isAudio)
+							{
+								var aud:OverlayDisplayAudio = new OverlayDisplayAudio();
+								aud.overlayDetail = detail;
+								
+								canvas.addElement(aud);
+								_canvasElements.push(aud);								
+							}
+							break;
+					}
+				}				
+			}
+
+			protected function btnPlay_clickHandler(event:MouseEvent):void
+			{
+				btnPlay.enabled = false;
+				btnStop.enabled = true;
+				lblBuffering.visible = false;
+
+				swfLoading.visible = true;
+				swfThumb.visible = false;
+				
+				var url:String = _appManager.s3.getSelectURL(_appManager.currentAccount.bucket, _baseMedia.itemName);
+				if (_baseMedia.mediaType == Constants.MEDIA_TYPE_VIDEO)
+				{
+					videoDisplay.source = url;
+					videoDisplay.visible = true;
+					_firstPlayState = true;			
+					_bufferPause = false;
+				}
+				else
+				{
+					swfBase.signedURLSource = url;
+					swfBase.visible = true;
+				}
+			}
+				
+			protected function btnStop_clickHandler(event:MouseEvent):void
+			{
+				canvas.removeAllElements();
+				btnPlay.enabled = true;
+				btnStop.enabled = false;			
+				videoDisplay.stop();
+				videoDisplay.source = null;
+				videoDisplay.visible = false;
+				swfBase.source = null;
+				swfBase.visible = false;				
+				swfLoading.visible = false;
+				swfThumb.visible = true;				
+			}
+			
+			protected function btnZoom_clickHandler(event:MouseEvent):void
+			{
+				this.stop();
+				this.parentApplication.storyboard.showLargePreview(Constants.PREVIEW_OVERLAY, _overlay);
+			}
+
+			private function videoCompleteHandler(event:Event):void
+			{
+				if ( parseInt(_overlay.duration) == 0) {	this.stop();}
+			}
+			
+			
+		]]>
+	</fx:Script>
+	<mx:SWFLoader id="swfLoading" horizontalCenter="0" verticalCenter="0" width="100" height="100" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>
+
+	<s:Group id="groupPreview" clipAndEnableScrolling="true" width="100%" height="100%" x="0" y="0">
+		<mx:SWFLoader id="swfThumb" scaleContent="true" maintainAspectRatio="false" complete="swfThumb_completeHandler(event)" ioError="swfThumb_ioErrorHandler(event)" autoLoad="false"/>		
+		
+		<!-- The actual play canvas -->
+		<components:S3SWFLoader id="swfBase" x="0" y="0" complete="swfBase_completeHandler(event)" autoLoad="true"  
+								ioError="swfBase_completeHandler(event)" enterFrame="swfBase_enterFrameHandler(event)" />
+		<s:VideoDisplay id="videoDisplay" x="0" y="0" mediaPlayerStateChange="videoDisplay_mediaPlayerStateChangeHandler(event)" autoPlay="true" scaleMode="stretch"/>					
+		<s:Group id="canvas" />
+	</s:Group>
+	<s:Label id="lblBuffering" text="Buffering" width="100%" alpha=".25" styleName="Buffering" x="0" bottom="40"/>	
+	<s:HGroup id="groupControls" width="100%" gap="1" height="22" bottom="0" right="22">
+		<mx:Spacer width="100%" />
+		<components:IconButton id="btnPlay" icon="{iconPlay}" click="btnPlay_clickHandler(event)" />
+		<components:IconButton id="btnStop" icon="{iconStop}" click="btnStop_clickHandler(event)" enabled="false" />
+		<mx:Spacer width="100%" />
+	</s:HGroup>
+	<components:IconButton id="btnZoom" icon="{iconZoom}" right="0" visible="{!fullScreen}"
+						   click="btnZoom_clickHandler(event)" toolTip="Preview in larger window" bottom="0"/>
+
+</s:Group>

@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%" 
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)" title="Screen Reports">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Screens;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			private static const REPORT_SUMMARY:String = "REPORT_SUMMARY";
+			private static const REPORT_TRACK0:String = "REPORT_TRACK0";
+			private static const REPORT_TRACK1:String = "REPORT_TRACK1";
+			private static const REPORT_TRACK2:String = "REPORT_TRACK2";
+			private static const REPORT_TRACK3:String = "REPORT_TRACK3";
+			private static const REPORT_TRACK4:String = "REPORT_TRACK4";
+			private static const REPORT_TRACK5:String = "REPORT_TRACK5";
+			private static const REPORT_TRACK6:String = "REPORT_TRACK6";
+			
+			private var _appManager:AppManager;
+			private var _isDirty:Boolean = true;	// This is a read only screen but add justin case
+
+			public var screenId:String = "";
+			[Bindable] public var _screens:ArrayCollection = null;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{	
+				PopUpManager.centerPopUp(this);				
+					
+				_appManager = this.parentApplication.appManager;
+				_appManager.addEventListener(AppManager.APP_RESIZE, appResizeHandler);
+				
+				// If we were not passed an array, then query it				
+				if (_screens == null)
+				{
+					this.enabled = false
+					var sql:String = "Select * from Screens where accountId='" + _appManager.currentAccount + "'";
+					_appManager.sdb.select(sql, loadScreensHandler, Screens);
+				}
+				else
+				{
+					setSelectedIndex();
+				}
+			}
+			
+			private function appResizeHandler(event:Event):void
+			{
+				this.width = this.parentApplication.width * Constants.EDIT_WINDOW_SIZE;
+				this.height = this.parentApplication.height * Constants.EDIT_WINDOW_SIZE;
+				
+				PopUpManager.centerPopUp(this);
+			}
+			
+			private function loadScreensHandler(event:SDBEvent):void
+			{
+				this.enabled = true;				
+				if (!event.success)
+				{
+					Alert.show("Could not load screen list. Please try again later", "Load Error");
+					closeHandler(null);
+				}
+								
+				_screens = new ArrayCollection();
+				_screens.source = event.result as Array;
+				
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name")];
+				
+				_screens.sort = sort;
+				_screens.refresh();
+			
+				setSelectedIndex();
+			}
+			
+			private function setSelectedIndex():void
+			{
+				if (_screens.length > 0) {ddScreens.selectedIndex = 0;}
+				for (var i:int = 0; i < ddScreens.dataProvider.length; i++)
+				{
+					if (ddScreens.dataProvider[i] == screenId)
+					{
+						ddScreens.selectedIndex = i;
+						break;
+					}
+				}				
+			}
+
+
+			protected function closeHandler(event:CloseEvent):void
+			{
+				var closeWindow:Boolean;
+				
+				if (event == null)
+				{
+					// This was called directly from the program
+					closeWindow = true;
+					
+					// Broadcast a new event. The parent will be listening
+					if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE, false, false, Alert.YES));}
+				}
+				else  
+				{
+					switch (CloseEvent(event).detail)
+					{
+						case Alert.NO:
+							closeWindow = false;
+							break;
+						
+						case Alert.OK:
+						case Alert.YES:
+							closeWindow = true;
+							break;
+						
+						default:
+							closeWindow = !_isDirty
+							if (_isDirty) {Alert.show("Do you want to close window?", "Close Window", Alert.YES | Alert.NO, null, closeHandler, null, Alert.NO);}
+					}
+				}
+				
+				if (closeWindow) {PopUpManager.removePopUp(this);}				
+			}
+
+
+			protected function btnGo_clickHandler(event:MouseEvent):void
+			{
+				// TODO Auto-generated method stub
+			}
+
+		]]>
+	</fx:Script>
+	<s:controlBarContent>
+	
+	</s:controlBarContent>
+	<mx:HBox id="boxSelect" x="10" y="10" verticalAlign="middle">
+		<s:Label  text="Screen" fontWeight="bold" />
+		<s:DropDownList id="ddScreens" width="200" dataProvider="{_screens}" labelField="name" />		
+		<mx:Spacer width="20" />
+		<s:Label  text="Report" fontWeight="bold" />
+		<s:DropDownList id="ddReports"  width="200">
+			<s:dataProvider>
+				<s:ArrayCollection>
+					<fx:Object label="Summary" value="{REPORT_SUMMARY}" />
+					<fx:Object label="Tracking (Sunday)" value="{REPORT_TRACK0}" />
+					<fx:Object label="Tracking (Monday)" value="{REPORT_TRACK1}" />
+					<fx:Object label="Tracking (Tuesday)" value="{REPORT_TRACK2}" />
+					<fx:Object label="Tracking (Wednesday)" value="{REPORT_TRACK3}" />
+					<fx:Object label="Tracking (Thursday)" value="{REPORT_TRACK4}" />
+					<fx:Object label="Tracking (Friday)" value="{REPORT_TRACK5}" />
+					<fx:Object label="Tracking (Saturday)" value="{REPORT_TRACK6}" />
+				</s:ArrayCollection>
+			</s:dataProvider>
+		</s:DropDownList>		
+		<mx:Spacer width="10" />
+		<s:Button id="btnGo" label="Go" click="btnGo_clickHandler(event)"  width="37"/>
+	</mx:HBox>
+</s:TitleWindow>

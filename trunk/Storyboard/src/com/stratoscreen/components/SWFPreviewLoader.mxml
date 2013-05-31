@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*" 
+		 width="100%" height="100%" creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.EffectsManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.utils.ImageUtils;
+			
+			import mx.effects.Parallel;
+			import mx.events.FlexEvent;
+			
+			import spark.effects.Fade;
+			
+			public var mediaId:String;	// Just for tracking
+			public var duration:int;
+			public var frames:int;
+			public var signedUrl:String;
+			public var effectId:String = EffectsManager.EFFECT_NONE;
+			public var previewWidth:Number;
+			public var previewHeight:Number
+			public var fullScreen:Boolean;
+			public var fullScreenBounds:Rectangle = null;
+			public var viewMode:String;
+			public var callbackEffectEnd:Function = null;
+			public var callbackLoaded:Function = null;
+			public var callbackComplete:Function; 
+			
+			private var _effectsManager:EffectsManager;
+			private var _imageUtils:ImageUtils;   
+			private var _frameCount:int;
+			private var _timer:Timer;
+			private var _startTime:Date;
+			private var _stopped:Boolean = false;			
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_timer = new Timer(250);
+				_timer.addEventListener(TimerEvent.TIMER, timerHandler);
+
+				_effectsManager = new EffectsManager();
+				_imageUtils = new ImageUtils(this.viewMode);
+
+				swfLoading.visible = true;
+				swfPreview.signedURLSource = signedUrl;
+			}
+			
+			public function dispose():void
+			{
+				this.stop();
+				this.removeAllElements();
+			}
+			
+			public function stop():void
+			{
+				// Do not worry about clean up. The parent shoudl handle that
+				if (_timer != null) {_timer.stop();}
+				_stopped = true;				
+			}
+
+			protected function swfPreview_completeHandler(event:Event):void
+			{
+				var contentWidth:Number;
+				var contentHeight:Number;
+				
+				if (event.target.content is Bitmap)
+				{
+					contentWidth = event.target.content.bitmapData.width;
+					contentHeight = event.target.content.bitmapData.height;
+				}
+				else
+				{
+					// Assume this is a SWF
+					contentWidth = event.target.content.loaderInfo.width;
+					contentHeight = event.target.content.loaderInfo.height;
+				}
+				
+				var boxWidth:Number = previewWidth;
+				var boxHeight:Number = previewHeight;
+				if (fullScreenBounds != null)
+				{
+					boxWidth = fullScreenBounds.width;
+					boxHeight = fullScreenBounds.height;
+				}
+				
+				var rect:ResizeRectangle = _imageUtils.getBestFit(contentWidth, contentHeight, boxWidth, boxHeight, this.fullScreen);
+				swfPreview.x = rect.x;
+				swfPreview.y = rect.y;
+				swfPreview.width = rect.width;
+				swfPreview.height = rect.height;
+				
+				swfLoading.visible = false;
+				swfPreview.visible = true;
+				_startTime = new Date();
+				_timer.start();
+				
+				// Count the frames. We may need to stop it later
+				if (this.frames > 0)
+				{
+					swfPreview.content.addEventListener(Event.ENTER_FRAME, swfPreviewContentFrameHandler);
+				}
+				
+				// Play the effects
+				switch (this.effectId)
+				{
+					case EffectsManager.EFFECT_FADE:
+						var fade:Fade = _effectsManager.fadeIn(effectEndHandler);
+						fade.play([swfPreview]);
+						break;
+
+					case EffectsManager.EFFECT_SPIN:
+						var spin:Parallel = _effectsManager.spinIn(effectEndHandler);
+						spin.play([swfPreview]);
+						break;
+
+					case EffectsManager.EFFECT_SLIDE:
+						var slide:Parallel = _effectsManager.slideIn(effectEndHandler, -rect.width);
+						slide.play([swfPreview]);
+						break;
+
+					default:
+						this.callLater(effectEndHandler);
+				}
+				
+				if (callbackLoaded != null) {callbackLoaded(event);}
+			}
+			
+			protected function swfPreview_ioErrorHandler(event:IOErrorEvent):void
+			{
+				swfLoading.visible = false;
+				callbackComplete();
+			}
+			
+			private function swfPreviewContentFrameHandler(event:Event):void
+			{
+				_frameCount++;
+			}
+
+			private function timerHandler(event:TimerEvent):void
+			{
+				// Check for those SWFs that do not expose their frames
+				// Check to see if we have played too far 
+				if (this.duration == 0)
+				{
+					if ( _frameCount > this.frames)
+					{
+						_timer.stop();
+						if (!_stopped) {callbackComplete();}
+					}
+				}
+				else
+				{	
+					var now:Date = new Date();
+					var milliElapsed:Number = now.time - _startTime.time;				
+					if (milliElapsed > (duration * 1000))
+					{
+						_timer.stop();
+						if (!_stopped) {callbackComplete();}
+					}
+				}
+			}
+
+			private function effectEndHandler(event:Event = null):void
+			{
+				// The parent will need the parent ID so it can clean up past media
+				if (!_stopped) {callbackEffectEnd(this.mediaId);}
+			}
+
+		]]>
+	</fx:Script>
+	<mx:SWFLoader id="swfLoading" horizontalCenter="0" verticalCenter="0" width="100" height="100" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>
+	<components:S3SWFLoader id="swfPreview" complete="swfPreview_completeHandler(event)" autoLoad="true" maintainAspectRatio="false" 
+							maintainProjectionCenter="false" ioError="swfPreview_ioErrorHandler(event)"/>		
+
+</s:Group>

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%" 
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)" xmlns:view="com.stratoscreen.view.*">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Accounts;
+			
+			import mx.controls.Alert;
+			import mx.events.FlexEvent;
+
+			[Bindable] public var panelIndex:int;
+			
+			private var _appManager:AppManager;
+			private var _shown:Boolean = false;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+
+
+			protected function showHandler(event:FlexEvent):void
+			{
+				// Turn on the billing icon
+				if (_appManager.currentAccount.billingType == Accounts.BILLING_NONE)
+				{
+					if (linkBilling != null) 
+					{
+						panelLinks.removeElement(linkBilling);
+						linkBilling = null;
+					}
+				}
+				else
+				{
+					linkBilling.visible = true;
+				}
+			}
+
+			protected function link_clickHandler(event:MouseEvent):void
+			{
+				// Check for a dirty panel before we switch views
+				if (vsMain.selectedChild != navBlank)
+				{
+					if (Object(vsMain.selectedChild).isDirty)
+					{
+						Alert.show("Cannot change navigation until the current changes are saved or cancelled.", "Changes Pending");
+						return;
+					}
+				}
+				
+				lblTitle.text = event.target.label;
+				linkAccount.enabled = true;
+				linkDefaults.enabled = true;
+				linkUsers.enabled = true;
+				linkContent.enabled = true;
+				linkStream.enabled = true;
+				linkAWS.enabled = true;
+				if (linkBilling != null) {linkBilling.enabled = true;}
+				
+				if (event.target == linkAccount)
+				{
+					linkAccount.enabled = false;
+					vsMain.selectedChild = navAccount;
+				}
+				else if (event.target == linkDefaults)
+				{
+					linkDefaults.enabled = false;
+					vsMain.selectedChild = navDefaults;
+				}
+				else if (event.target == linkUsers)
+				{
+					linkUsers.enabled = false;
+					vsMain.selectedChild = navUsers;
+				}
+				else if (event.target == linkContent)
+				{
+					linkContent.enabled = false;
+					vsMain.selectedChild = navContent;
+				}
+				else if (event.target == linkStream)
+				{
+					linkStream.enabled = false;
+					vsMain.selectedChild = navStream;
+				}
+				else if (event.target == linkAWS)
+				{
+					linkAWS.enabled = false;
+					vsMain.selectedChild = navAWS;
+				}
+				else if (event.target == linkBilling)
+				{
+					linkBilling.enabled = false;
+					vsMain.selectedChild = navBilling;
+				}
+			}
+
+		]]>
+	</fx:Script>
+	<s:Panel x="10" y="10" width="142"  styleName="Group" title="Navigation" id="panelLinks">
+		<s:layout>
+			<s:VerticalLayout paddingBottom="10"/>
+		</s:layout>
+		<mx:Spacer/>
+		<mx:LinkButton id="linkAccount" label="Account Settings" icon="@Embed(source='/assets/icons/cog.png')" click="link_clickHandler(event)" width="100%"/>
+		<mx:LinkButton id="linkDefaults" label="Account Defaults" icon="@Embed(source='/assets/icons/database.png')" click="link_clickHandler(event)" width="100%"/>
+		<mx:LinkButton id="linkUsers" label="User Management" icon="@Embed(source='/assets/icons/user.png')" click="link_clickHandler(event)" width="100%"/>
+		<mx:LinkButton id="linkContent" label="Sample Content" icon="@Embed(source='/assets/icons/images.png')" click="link_clickHandler(event)" width="100%"/>
+		<mx:LinkButton id="linkStream" label="Streaming Media" icon="@Embed(source='/assets/icons/film_go.png')" click="link_clickHandler(event)" width="100%"/>
+		<mx:LinkButton id="linkAWS" label="AWS Statuses" icon="@Embed(source='/assets/icons/aws.png')" click="link_clickHandler(event)" width="100%"/>
+		<mx:LinkButton id="linkBilling" width="100%" label="Billing" icon="@Embed(source='/assets/icons/money_dollar.png')" click="link_clickHandler(event)"  visible="false"/>
+	</s:Panel>
+	<s:Label left="165" top="10" fontWeight="bold" text="" id="lblTitle" fontSize="11"/>
+	<mx:ViewStack id="vsMain" left="175" top="30" bottom="5" right="5" selectedIndex="@{panelIndex}">
+		<s:NavigatorContent  id="navBlank" label="Blank" width="100%" height="100%" />
+		<view:NavAdminAccount id="navAccount" />
+		<view:NavAdminAccountDefaults id="navDefaults" />
+		<view:NavAdminUsers id="navUsers" />
+		<view:NavAdminSampleContent id="navContent" />
+		<view:NavAdminStreaming id="navStream" />
+		<view:NavAdminAWS id="navAWS" />
+		<view:NavAdminBilling id="navBilling" />
+	</mx:ViewStack>
+</s:NavigatorContent>

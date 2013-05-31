@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				   xmlns:mx="library://ns.adobe.com/flex/mx"  xmlns:components="com.stratoscreen.components.*" 
+				   width="100%" height="66"  styleName="Panel"  creationComplete="creationCompleteHandler(event)"  >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Users;
+			
+			import mx.events.FlexEvent;
+
+			[Bindable][Embed(source="/assets/icons/arrow_refresh.png")]
+			private var iconRefresh:Class;			
+
+			[Bindable] private var _total:int;
+			[Bindable] private var _mgrs:int;
+			[Bindable] private var _users:int;
+			[Bindable] private var _tooltip:String;
+			[Bindable] private var _queryError:Boolean;
+			private var _appManager:AppManager
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				loadSummaries();;
+			}
+			
+			private function btnRefresh_clickHandler(event:Event):void
+			{
+				loadSummaries();
+			}
+			
+			protected function loadSummaries():void
+			{
+				var sql:String = "Select * from Users where accountId='";
+				sql += _appManager.currentAccount.itemName + "'";
+				
+				_appManager.sdb.select(sql, queryUsersHandler, Users);
+				this.enabled = false;
+			}
+
+			private function queryUsersHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				_queryError = event.success;
+				_tooltip = "";
+				
+				if (!event.success) 
+				{
+					_tooltip = "Error retriving TV summary. Please refresh later";
+					return;	
+				}
+				
+				// Loop through and get a summay of all the statuses
+				_total = 0;
+				_mgrs = 0;
+				_users = 0;
+				for each (var user:Users in event.result)
+				{
+					_total ++;
+					
+					switch (user.type)
+					{
+						case Constants.USER_TYPE_MANAGER:
+							_mgrs ++;
+							break;
+
+						case Constants.USER_TYPE_USER:
+							_users ++;
+							break;
+						
+					}
+				}
+			}
+
+
+
+		]]>
+	</fx:Script>
+	<s:Label x="10" y="10" text="User Summary" fontWeight="bold" fontSize="11"/>
+	<components:IconButton id="btnRefresh" icon="{iconRefresh}" toolTip="Refresh data"
+						   click="btnRefresh_clickHandler(event)"  right="5" top="5"/>
+
+	<s:HGroup y="35" left="10" right="10">
+		<s:Label x="10" y="30" text="Managers" fontWeight="bold" toolTip="{_tooltip}" />
+		<s:Label x="46" y="30" text="{_mgrs}"/>		
+		<mx:Spacer width="15" />
+		<s:Label x="10" y="30" text="Users" fontWeight="bold" toolTip="{_tooltip}"/>
+		<s:Label x="46" y="30" text="{_users}"/>		
+	</s:HGroup>
+</s:BorderContainer>

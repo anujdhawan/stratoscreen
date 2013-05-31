@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" autoDrawBackground="true" width="128" height="84" 
+				doubleClickEnabled="true" doubleClick="doubleClickHandler(event)"
+				creationComplete="creationCompleteHandler(event)" xmlns:components="com.stratoscreen.components.*">	
+		<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.controller.OverlayEditControl;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Overlays;
+			import com.stratoscreen.utils.Utils;
+			import com.stratoscreen.view.Storyboard;
+			import com.stratoscreen.view.WinChannelEdit;
+			
+			import mx.events.FlexEvent;
+			
+			public static var bucket:String;
+			public static var S3Endpoint:String;
+			private static var _appManager:AppManager;
+			private static var _storyboard:Storyboard;
+			
+			[Bindable][Embed(source="/assets/icons/delete.png")]
+			private var iconClear:Class;
+			
+			[Bindable] private var _overlay:Overlays;
+			private var _data:Object = null;
+			private var _shown:Boolean;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.data = _overlay;		// Draw the renderer
+				_storyboard = this.parentApplication.storyboard;
+				_appManager = this.parentApplication.appManager;
+			}
+
+			public override function get data():Object
+			{
+				return _data;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				if (_data == value) {return;} // the item renderer has not changed
+				if (value == null) {return;}
+				_data = value;
+				_overlay = value as Overlays;		
+				
+				// If we did not copy correctly, try again. Also assume this is the ChannelDetail item
+				if (_overlay == null) 
+				{
+					_overlay = Utils.copyClassObject(Overlays, value);
+					_overlay.type = Overlays.TYPE_CHANNEL;
+				}
+			}
+			
+			
+			protected function itemClickHandler(event:MouseEvent):void
+			{
+				if (_appManager.currentEditWindow is WinChannelEdit)
+				{
+					WinChannelEdit(_appManager.currentEditWindow).itemClick(_overlay.itemName);
+				}
+				else
+				{
+					_storyboard.navChannels.navChannelsOverlay.itemClick(this);
+				}
+				event.stopImmediatePropagation();
+			}
+			
+			protected function doubleClickHandler(event:MouseEvent):void
+			{
+				// open the detail depending on the main edit 
+				if (_appManager.currentEditWindow is WinChannelEdit)
+				{
+					var overlayControl:OverlayEditControl = new OverlayEditControl(this.parentApplication as DisplayObject);
+					overlayControl.editOverlay(_overlay);
+				}
+				else
+				{
+					_storyboard.navChannels.navChannelsOverlay.itemClick(this);
+					
+					if (_appManager.currentUser.type == Constants.USER_TYPE_MANAGER || _overlay.createdBy == _appManager.currentUser.itemName)
+					{
+						_storyboard.navChannels.navChannelsOverlay.overlayDetail.editOverlay();
+					}
+				}
+			}			
+			
+
+			protected function btnClear_clickHandler(event:MouseEvent):void
+			{
+				if (_appManager.currentEditWindow is WinChannelEdit)
+				{
+					// We only need the Channe; ID for this
+					WinChannelEdit(_appManager.currentEditWindow).removeItemById(_data.itemName);
+				}
+				event.stopImmediatePropagation();
+			}
+		]]>
+		</fx:Script>
+	<s:Group id="groupThumb" x="0" y="0" width="128" height="63" click="itemClickHandler(event)">
+		<mx:Image id="imgFilm" source="@Embed('/assets/images/filmStrip.png')" scaleContent="false"  width="128" height="69" click="itemClickHandler(event)"/>
+		<mx:Image id="imgOverlay" scaleContent="false"  source="@Embed('/assets/images/overlay.png')" click="itemClickHandler(event)"  x="75" y="29"/>		
+		<mx:Image id="imgOverlayImage" scaleContent="false"  source="@Embed('/assets/images/overlayImage.png')" click="itemClickHandler(event)"  x="19" y="7"/>		
+	</s:Group>
+	<components:IconButton right="0" top="0" id="btnClear" icon="{iconClear}" click="btnClear_clickHandler(event)"/>	
+	<s:Label text="{_overlay.name}" width="100%" left="0" bottom="0" textAlign="center" maxDisplayedLines="1"/>
+</s:ItemRenderer>

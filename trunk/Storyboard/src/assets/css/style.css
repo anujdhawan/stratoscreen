@@ -1,0 +1,228 @@
+/* CSS file */
+@namespace s "library://ns.adobe.com/flex/spark";
+@namespace mx "library://ns.adobe.com/flex/mx";
+
+global
+{
+	chromeColor: #C4D3ED;
+	focusColor: #9DB6E1;
+	fontFamily: Arial;
+	fontSize: 11;
+	color: #404040;
+}
+
+mx|Alert
+{
+	chromeColor: #B1C5E7;
+}
+
+s|Button
+{
+	chromeColor: #C4D3ED;
+	focusColor: #9DB6E1;
+	fontWeight: bold;
+	skinClass: ClassReference("com.stratoscreen.skins.Button");
+}
+
+s|TextInput
+{
+	fontFamily: Arial;
+	fontSize: 11;
+}
+
+s|Label
+{
+	verticalAlign: middle;
+}
+
+s|Panel
+{
+	chromeColor: #9DB6E1;
+}
+
+s|Panel #titleDisplay 
+{
+	color: #FFFFFF;	
+}
+
+s|Panel.Group
+{
+	cornerRadius: 6;
+	dropShadowVisible: false;
+	borderColor: #808080;		
+}
+
+mx|LinkButton
+{
+	textAlign: left;
+	fontWeight: bold;
+}
+
+s|CheckBox
+{
+	fontStyle: italic;
+	fontWeight: normal;
+}
+
+s|TitleWindow
+{
+	borderColor: #808080;
+}
+
+s|BorderContainer.Main
+{
+	borderColor: #808080;
+	cornerRadius: 6;
+}
+s|BorderContainer.TabButtonSelected
+{
+	backgroundColor: #FFFFFF;
+	borderColor: #808080;
+	cornerRadius: 4;
+}
+
+s|Label.TabButtonSelected
+{
+	fontSize: 11;
+	fontWeight: bold;
+	textAlign: center;
+}
+s|BorderContainer.TabButtonUnselected
+{
+	backgroundColor: #9DB6E1;
+	borderColor: #808080;
+	cornerRadius: 4;
+}
+
+s|Label.TabButtonUnselected
+{
+	fontSize: 11;
+	fontWeight: bold;
+	textAlign: center;
+	color: #FFFFFF;
+}
+
+
+s|BorderContainer
+{
+	borderColor: #808080;
+	cornerRadius: 2;
+}
+
+s|BorderContainer.DetailBand
+{
+	backgroundColor: #F5F8FF;
+	cornerRadius: 2;
+}
+
+s|TextArea.Header
+{
+	borderVisible: false;
+	fontFamily: Arial;
+	fontSize: 12;
+}
+
+s|Label.Status
+{
+	color: #FFFFFF;
+}
+
+s|BorderContainer.NotUploaded
+{
+}
+
+s|BorderContainer.MediaDetail
+{
+	backgroundColor: #F5F8FF;
+	borderColor: #C4D3ED;
+	borderWeight: 1;
+	cornerRadius: 4;
+}
+
+s|BorderContainer.DragItem
+{
+	backgroundColor: #F5F8FF;
+	borderColor: #3E63C1;
+	borderWeight: 1;
+	cornerRadius: 4;
+}
+
+
+s|Label.Buffering
+{
+	color: #FFFFFF;
+	fontStyle: italic;
+	fontWeight: bold;
+	textAlign: center;
+}
+
+s|BorderContainer.Panel
+{
+	backgroundColor: #FFFFFF;
+	borderColor: #C4D3ED;
+	borderWeight: 1;
+	cornerRadius: 4;
+}
+
+s|BorderContainer.PanelWarning
+{
+	backgroundColor: #FFF2CC;
+	borderColor: #FFCD38;
+	borderWeight: 1;
+	cornerRadius: 4;
+}
+
+s|Button.CloseButton
+{
+	chromeColor: #CC0000;
+	color: #FFFFFF;
+	symbol-color: #FFFFFF;
+	focusColor: #990000;
+	fontFamily: Arial;
+	fontSize: 12;
+	fontWeight: bold;
+	cornerRadius: 0;
+}
+s|Label.ActivateCode
+{
+	color: #000080;
+	fontFamily: "Courier New";
+	fontSize: 16;
+	fontStyle: normal;
+	fontWeight: bold;
+}
+s|BorderContainer.PanelInfo
+{
+	backgroundColor: #F5F8FF;
+	borderColor: #C4D3ED;
+	borderWeight: 1;
+	cornerRadius: 4;
+}
+
+mx|LinkBar.NoText
+{
+	errorColor: #C4D3ED;
+}
+
+mx|ToolTip
+{
+	fontFamily: Arial;
+	fontSize: 10;
+}
+
+s|Button.IconButtonDelete
+{
+	chromeColor: #FFA8A8;
+	focusColor: #FF7575;
+}
+s|DropDownList
+{
+	skinClass: ClassReference("com.stratoscreen.skins.DropDownList");
+}
+s|BorderContainer.AttrMenu
+{
+	cornerRadius: 4;
+	dropShadowVisible: true;
+}
+
+

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:MXDataGridItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+						  xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*"
+						  focusEnabled="true" >
+	<fx:Script>
+		<![CDATA[
+			
+			import mx.utils.StringUtil;
+			
+			[Bindable][Embed(source="/assets/icons/add.png")]
+			private var iconAdd:Class;			
+			[Bindable][Embed(source="/assets/icons/delete.png")]
+			private var iconDelete:Class;			
+			
+			public override function set data(value:Object):void
+			{
+				super.data = value;
+				if (value.blankRow)
+				{
+					// Hide the add icon for now
+					//imgUpdate.source = iconAdd;		
+					//imgUpdate.toolTip = "Add time";
+					imgUpdate.source = null;
+				}
+				else
+				{
+					// There are a few items slipping through. Not sure why
+					if (StringUtil.trim(value.startTime) != "" && StringUtil.trim(value.endTime) != "")
+					{
+						imgUpdate.source = iconDelete;
+						imgUpdate.toolTip = "Remove time";
+					}
+				}
+			}
+		]]>
+	</fx:Script>
+	<components:ActionIcon id="imgUpdate" height="16" width="16"  horizontalCenter="0" verticalCenter="0"/>
+</s:MXDataGridItemRenderer>

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:MXDataGridItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+						  xmlns:mx="library://ns.adobe.com/flex/mx"  focusEnabled="true" height="16" width="16" 
+						  creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.model.domains.MediaGroups;
+			
+			import mx.events.FlexEvent;
+
+			[Embed(source="/assets/icons/arrow_switch_down.png")]
+			private static var iconRandom:Class;
+			[Embed(source="/assets/icons/arrow_down.png")]
+			private static var iconSeq:Class;
+			private var _data:Object
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.data = _data;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				_data = value;
+				if (value is MediaGroups)
+				{
+					var group:MediaGroups = value as MediaGroups;
+					if (group.type == Constants.GROUP_TYPE_SEQUENCE)
+					{
+						imgType.source = iconSeq;
+						imgType.toolTip = "Sequential";
+					}
+					else
+					{
+						imgType.source = iconRandom;
+						imgType.toolTip = "Random";						
+					}
+				}
+			}
+
+		]]>
+	</fx:Script>
+	<mx:Image id="imgType" x="3" y="0" height="16" width="16"/>
+</s:MXDataGridItemRenderer>

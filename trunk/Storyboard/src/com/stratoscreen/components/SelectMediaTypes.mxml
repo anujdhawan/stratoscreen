@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" width="126" height="110" dropShadowVisible="true" creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+
+			public static const SELECTION_CHANGE:String = "SELECTION_CHANGE";
+			
+			[Bindable][Embed(source="assets/images/image.png")]
+			private var imageImage:Class;
+			[Bindable][Embed(source="assets/images/audio.png")]
+			private var imageAudio:Class;
+			[Bindable][Embed(source="assets/images/video.png")]
+			private var imageVideo:Class;
+			[Bindable][Embed(source="assets/images/swf.png")]
+			private var imageSWF:Class;
+			
+			[Bindable] public var audioSelected:Boolean = true;
+			[Bindable] public var imagesSelected:Boolean = true;
+			[Bindable] public var swfsSelected:Boolean = true;
+			[Bindable] public var videoEnabled:Boolean = true;
+			[Bindable] public var videoSelected:Boolean = true;
+			
+			private var _allSelected:Boolean = true;
+			
+			public function reset():void
+			{
+				audioSelected = true;
+				imagesSelected = true;
+				swfsSelected = true;
+				videoEnabled = true;
+				videoSelected = true;
+			}
+			
+			public function get allSelected():Boolean
+			{
+				return _allSelected;
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+			}
+
+			protected function check_changeHandler(event:Event):void
+			{		
+				_allSelected = audioSelected && imagesSelected && swfsSelected && videoSelected;
+				this.dispatchEvent(new Event(SELECTION_CHANGE));
+			}
+
+		]]>
+	</fx:Script>
+	<s:VGroup verticalAlign="middle" left="5" top="5" height="98">
+		<s:Label text="Filter by Media Type"  fontWeight="bold"/>
+		<s:HGroup>
+			<mx:Spacer />
+			<s:CheckBox selected="@{audioSelected}" change="check_changeHandler(event)"/>
+			<mx:Image width="16" height="16" source="@Embed('assets/icons/audio.png')"/>
+			<s:Label text="Audio" height="100%"/>
+		</s:HGroup>
+		<s:HGroup>
+			<mx:Spacer />
+			<s:CheckBox selected="@{imagesSelected}" change="check_changeHandler(event)"/>
+			<mx:Image width="16" height="16" source="@Embed('assets/icons/image.png')"/>
+			<s:Label text="Images" height="100%"/>
+		</s:HGroup>
+		<s:HGroup>
+			<mx:Spacer />
+			<s:CheckBox selected="@{swfsSelected}" change="check_changeHandler(event)"/>
+			<mx:Image width="16" height="16" source="@Embed('assets/icons/swf.png')"/>
+			<s:Label text="SWFs" height="100%"/>
+		</s:HGroup>
+		<s:HGroup enabled="{videoEnabled}">
+			<mx:Spacer />
+			<s:CheckBox selected="@{videoSelected}" change="check_changeHandler(event)"/>
+			<mx:Image width="16" height="16" source="@Embed('assets/icons/film.png')"/>
+			<s:Label text="Video" height="100%"/>
+		</s:HGroup>
+	</s:VGroup>
+</s:BorderContainer>

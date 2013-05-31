@@ -1,0 +1,600 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" minHeight="135" minWidth="150" 
+		 creationComplete="creationCompleteHandler(event)" xmlns:components="com.stratoscreen.components.*" hide="group1_hideHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.ImageCacheManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.Medias;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.view.Storyboard;
+			
+			import mx.controls.Image;
+			import mx.events.FlexEvent;
+			import mx.graphics.ImageSnapshot;
+			import mx.graphics.codec.PNGEncoder;
+			
+			import org.osmf.display.ScaleMode;
+			import org.osmf.events.MediaPlayerStateChangeEvent;
+			import org.osmf.media.MediaPlayerState;
+			import org.osmf.media.URLResource;
+			import org.osmf.net.StreamType;
+			import org.osmf.net.StreamingURLResource;
+			
+			
+			public static const THUMB_CHANGE:String = "THUMB_CHANGE";
+			
+			[Bindable][Embed(source="/assets/icons/control_pause_blue.png")]
+			private var iconPause:Class;			
+			[Bindable][Embed(source="/assets/icons/control_play_blue.png")]
+			private var iconPlay:Class;			
+			[Bindable][Embed(source="/assets/icons/control_stop_blue.png")]
+			private var iconStop:Class;
+			[Bindable][Embed(source="/assets/icons/camera.png")]
+			private var iconCamera:Class;
+			[Bindable][Embed(source="/assets/icons/image_edit.png")]
+			private var iconImageEdit:Class;
+			[Bindable][Embed(source="/assets/icons/arrow_out.png")]
+			private var iconZoom:Class;
+			
+			[Bindable][Embed(source="assets/images/image.png")]
+			private var imageImage:Class;
+			[Bindable][Embed(source="assets/images/audio.png")]
+			private var imageAudio:Class;
+			[Bindable][Embed(source="assets/images/video.png")]
+			private var imageVideo:Class;
+			[Bindable][Embed(source="assets/images/swf.png")]
+			private var imageSWF:Class;
+
+			public var allowThumbOverride:Boolean = false; 
+			public var fullScreen:Boolean = false;
+			public var fullScreenBounds:Rectangle;	// Not needed for MediaPlayer
+			public var stream:Boolean = false;
+			
+			[Bindable] private var _isImage:Boolean = false;
+			[Bindable] private var _isSWF:Boolean = false;
+			[Bindable] private var _isVideo:Boolean = false;
+			[Bindable] private var _isAudio:Boolean = false;
+			[Bindable] private var _previewUrl:String = null;
+			private var _media:Medias; 
+			private var _appManager:AppManager;
+			private var _awsEndpoint:AWSEndpoint;
+			private var _thumbBmpData:BitmapData = null;
+			private var _snapshotTaken:Boolean = false;
+			private var _playing:Boolean = false;
+			private var _paused:Boolean = false;
+			private var _thumbFile:File;
+			private var _imageUtils:ImageUtils;
+			private var _viewMode:String = null;
+			private var _soundPlayer:SoundPlayer = null;
+			
+			public function get viewMode():String
+			{
+				return _viewMode;
+			}
+			
+			public function set viewMode(value:String):void
+			{
+				_viewMode = value;
+			}			
+			
+			public function get media():Medias
+			{
+				return _media;
+			}
+			
+			public function set media(value:Medias):void
+			{
+				_media = value;
+				if (groupControls == null) {return;} // Still renderering
+				if (_media == null) {return;}
+				
+				if (_appManager == null) {_appManager = this.parentApplication.appManager;}
+				if (_awsEndpoint == null) {_awsEndpoint = AWSRegions.getAWSEndpoint(_appManager.regionId);}				
+
+				if (_viewMode == null) {_viewMode = _appManager.currentAccount.defaultScreenView;}
+				_imageUtils = new ImageUtils(_viewMode);
+				
+				_isImage = false;
+				_isSWF = false;
+				_isVideo = false;
+				_isAudio = false;
+				swfThumb.source = null;
+				swfThumb.visible = false;
+				_previewUrl = null;
+				swfPreview.visible = false;
+				swfLoading.visible = true;
+				videoDisplay.visible = false;
+				webPlayer.visible = false;
+				lblBuffering.visible = false;
+				btnSnapshot.visible = false;				
+				btnSelectThumb.visible = allowThumbOverride;				
+				btnZoom.visible = false;
+				if (!allowThumbOverride && !fullScreen) {btnZoom.visible = true;}
+				
+				switch (_media.mediaType)
+				{
+					case Constants.MEDIA_TYPE_IMAGE:
+						_isImage = true;
+						
+						// Allow the user to see the actual image in full screen mode
+						groupControls.visible = fullScreen;
+						btnPlay.enabled = true;
+						btnStop.enabled = false;
+						btnPause.width = 0;
+						btnPause.visible = false;
+						break;
+						
+					case Constants.MEDIA_TYPE_SWF:
+						_isSWF = true;
+						groupControls.visible = true;
+						btnPlay.enabled = true;
+						btnStop.enabled = false;
+						btnPause.width = 0;
+						btnPause.visible = false;
+						break;
+						
+					case Constants.MEDIA_TYPE_VIDEO:
+						_isVideo = true;
+						groupControls.visible = true;		
+						btnPlay.enabled = true;
+						btnStop.enabled = false;
+						btnPause.enabled = false;
+						btnPause.width = btnPlay.width;
+						btnPause.visible = true;			
+						
+						videoDisplay.scaleMode = _viewMode == Constants.VIEW_LETTERBOX ?  ScaleMode.LETTERBOX : ScaleMode.STRETCH;
+						
+						// We'll need to resize the player too
+						if (_viewMode == Constants.VIEW_FULL )
+						{
+							// Use the stored values to get the sizing
+							var videoWidth:Number = parseFloat(_media.width);
+							var videoHeight:Number = parseFloat(_media.height);
+							var rect:ResizeRectangle = _imageUtils.getBestFit(videoWidth, videoHeight, groupPreview.width, groupPreview.height); 
+
+							videoDisplay.x = rect.x;
+							videoDisplay.y = rect.y;
+							videoDisplay.width = rect.width;
+							videoDisplay.height = rect.height;							
+						}
+						else
+						{
+							// Use 100% of the space. The control will stretch or Letterbox
+							videoDisplay.x = 0;
+							videoDisplay.y = 0;
+							videoDisplay.width = this.width;
+							videoDisplay.height = this.height;
+						}
+						
+						break;
+					
+					case Constants.MEDIA_TYPE_AUDIO:				
+						_isAudio = true;
+						groupControls.visible = true;	
+						btnPause.width = 0;
+						btnPause.visible = false;
+						btnStop.enabled = true;
+						btnZoom.visible = false;
+						break;
+				}
+
+				setThumbSource();		
+			}
+			
+			public function get thumbBmpData():BitmapData
+			{
+				return _thumbBmpData;
+			}
+			
+			public function stop():void
+			{
+				btnStop_clickHandler(null);
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.media = _media;	// Draw the screen
+			}
+			
+			protected function btnPlay_clickHandler(event:MouseEvent):void
+			{
+				if (_playing) {return;}
+				
+				// Watch for a paused player. We do not want to reload
+				if (_paused)	
+				{
+					videoDisplay.play();
+					btnPause.enabled = true;
+					btnPlay.enabled = false;
+					if (_soundPlayer != null) {_soundPlayer.play();}
+					return;
+				}
+
+				// Load the file for play
+				if (_previewUrl == null)
+				{					
+					if (_media.uploaded)
+					{
+						if (stream)
+						{
+							var url:String = _appManager.cf.createPrivateUrl(_appManager.currentAccount.streamDomain,
+								             _media.itemName, _media.mimeType, _appManager.settings.decryptedKeyPair, 
+											 _appManager.settings.decryptedKeyPairId);                                
+						}
+						else
+						{
+							_previewUrl = _appManager.s3.getSelectURL(_appManager.currentAccount.bucket, _media.itemName);
+						}
+					}
+					else
+					{
+						_previewUrl = File(_media.file).url;	
+					}
+				}	
+
+				if (_isImage || _isSWF) 
+				{
+					if (_media.acceleratedBool)
+					{
+						webPlayer.mediaUrl = _previewUrl;
+						webPlayer.visible = true;
+					}
+					else
+					{
+						swfPreview.signedURLSource = _previewUrl;						
+					}
+				}
+				else if (_isVideo)
+				{
+					if (stream)
+					{						
+						var urlResource:StreamingURLResource = new StreamingURLResource(url, StreamType.RECORDED, NaN, NaN, null, true);
+						//var urlResource:URLResource = new URLResource( new FMSURL(url, true));
+						videoDisplay.source = urlResource;
+					}
+					else
+					{
+						videoDisplay.source = _previewUrl;						
+					}
+				} 
+				else if (_isAudio)
+				{
+					_soundPlayer = new SoundPlayer(_previewUrl);
+					_soundPlayer.addEventListener(SoundPlayer.SOUND_START, soundStartHandler);
+					_soundPlayer.addEventListener(SoundPlayer.SOUND_END, soundEndHandler);
+					_soundPlayer.addEventListener(SoundPlayer.SOUND_PROGRESS, soundProgressHandler);
+					_soundPlayer.play();
+				}
+					
+				lblProgress.text = "";
+				swfThumb.visible = false;
+				if (!_media.acceleratedBool) {swfLoading.visible = true;}
+				videoDisplay.visible = _isVideo;
+				btnPlay.enabled = false;
+				btnStop.enabled = true;
+				btnPause.enabled = true;
+				btnSnapshot.visible = allowThumbOverride && !_isAudio;
+				btnSelectThumb.visible = false;
+				_paused = false;
+				_playing = true;
+			}
+			
+			protected function btnStop_clickHandler(event:MouseEvent):void
+			{
+				btnPlay.enabled = true;
+				btnStop.enabled = false;
+				btnPause.enabled = false;
+				btnSnapshot.visible = false;
+				btnSelectThumb.visible = allowThumbOverride;
+				swfThumb.visible = true;
+				swfPreview.visible = false;
+				swfLoading.visible = false;
+				videoDisplay.visible = false;
+				webPlayer.visible = false;
+				lblBuffering.visible = false;
+				if (_soundPlayer != null) {_soundPlayer.stop();}
+				_paused = false;
+				_playing = false
+			}
+
+			protected function btnPause_clickHandler(event:MouseEvent):void
+			{
+				videoDisplay.pause();
+				_paused = true;
+				btnPause.enabled = false;
+				btnPlay.enabled = true;
+				if (_soundPlayer != null) {_soundPlayer.stop();}
+			}
+
+			
+			protected function swfThumb_completeHandler(event:Event):void
+			{
+				//reposition the loader based on the content
+				var contentWidth:Number;
+				var contentHeight:Number;
+				var boxWidth:Number;
+				var boxHeight:Number;
+				
+				if (event == null && _media.thumbBmpData != null)	// We are reusing thumbnail data
+				{
+					var bitmap:Bitmap = new Bitmap(_media.thumbBmpData);
+					contentWidth = bitmap.bitmapData.width;
+					contentHeight = bitmap.bitmapData.height;
+					boxWidth = this.width;
+					boxHeight = this.height;					
+				}				
+				else if (event != null && (_isImage || event.target.content is Bitmap))
+				{
+					bitmap = event.target.content;
+					contentWidth = bitmap.bitmapData.width;
+					contentHeight = bitmap.bitmapData.height;
+					boxWidth = this.width;
+					boxHeight = this.height;
+				}
+				else if (event != null && _isSWF)
+				{
+					contentWidth = event.target.content.loaderInfo.width;
+					contentHeight = event.target.content.loaderInfo.height - groupControls.height;
+					boxWidth = this.width;
+					boxHeight = this.height - groupControls.height;
+				}
+				
+				// Manually center the image
+				var rect:ResizeRectangle = _imageUtils.getBestFit(contentWidth, contentHeight, boxWidth, boxHeight, fullScreen );
+				swfThumb.x = rect.x;
+				swfThumb.y = rect.y;
+				swfThumb.width = rect.width;
+				swfThumb.height = rect.height;
+				
+				swfLoading.visible = false;
+				swfThumb.visible = true;
+				
+				// Save the data for later use
+				if (_snapshotTaken) 
+				{
+					if (event.target.content is Bitmap ){_thumbBmpData = event.target.content.bitmapData;}	
+				}
+			}
+
+			protected function swfThumb_ioErrorHandler(event:IOErrorEvent):void
+			{
+				var thumbBMP:Bitmap;
+				
+				if (_isImage)
+				{
+					thumbBMP = new imageImage();
+				}
+				else if (_isSWF)
+				{
+					thumbBMP = new imageSWF();
+				}
+				else if (_isVideo)
+				{
+					thumbBMP = new imageVideo();
+				}
+				else if (_isAudio)
+				{
+					thumbBMP = new imageAudio();
+				}				
+
+				swfThumb_completeHandler(null);	
+			}
+			
+			protected function swfPreview_completeHandler(event:Event):void
+			{
+				var contentWidth:Number = event.target.content.loaderInfo.width;
+				var contentHeight:Number = event.target.content.loaderInfo.height;
+				
+				var rect:ResizeRectangle = _imageUtils.getBestFit(contentWidth, contentHeight, groupPreview.width,  groupPreview.height, fullScreen );
+				swfPreview.x = rect.x;
+				swfPreview.y = rect.y;
+				swfPreview.width = rect.width;
+				swfPreview.height = rect.height;
+				
+				swfLoading.visible = false;
+				swfPreview.visible = true;
+				swfThumb.visible = false;				
+			}
+
+			protected function swfPreview_ioErrorHandler(event:IOErrorEvent):void
+			{
+				swfPreview.visible = true;
+				swfThumb.visible = false;
+				btnPlay.enabled = true;
+				btnStop.enabled = false;
+			}
+			
+			
+			private function setThumbSource():void
+			{				
+				// If we have prerendered thumbnail use that
+				if (_media.thumbBmpData == null)
+				{
+					if (!_media.uploaded) {return;}
+					
+					var url:String;
+					url = "https://" + _awsEndpoint.s3 + "/" + _appManager.currentAccount.bucket;
+					url += "/" + Constants.THUMB_PREFIX + _media.itemName + Constants.THUMB_EXTENSION;
+					
+					swfThumb.source = ImageCacheManager.getInstance().getImageByURL(url);
+					swfThumb.load();
+				}
+				else
+				{
+					// Manually call the complete handler
+					swfThumb.load(new Bitmap(_media.thumbBmpData));
+					swfThumb_completeHandler(null);					
+				}
+			}
+			
+			private function setVideoSource():void
+			{
+				if (_media.file == null)
+				{
+					
+				}
+				else
+				{
+					videoDisplay.source = File(_media.file).url;					
+				}
+			}
+			
+
+			protected function btnSnapshot_clickHandler(event:MouseEvent):void
+			{
+				var source:DisplayObject = swfPreview;
+				if (_isVideo) {source = videoDisplay;}
+				ImageSnapshot.defaultEncoder = PNGEncoder;
+				var snapshot:ImageSnapshot = ImageSnapshot.captureImage(source );
+				
+				// Stop playing and show what we have
+				_snapshotTaken = true;
+				swfThumb.load(snapshot.data);
+				swfThumb.visible = true;
+				swfPreview.visible = false;				
+				btnPlay.enabled = true;
+				btnStop.enabled = false;
+				btnSnapshot.visible = false;
+				
+				if (_isVideo) 
+				{
+					videoDisplay.stop();
+					videoDisplay.visible = false;
+					_playing = false;
+				}
+				
+				this.dispatchEvent(new Event(THUMB_CHANGE));
+			}
+
+			protected function btnSelectThumb_clickHandler(event:MouseEvent):void
+			{
+				_thumbFile = new File();
+				_thumbFile.addEventListener(Event.SELECT, fileSelectHandler);
+				_thumbFile.browse([new FileFilter("Images", Constants.FILTER_IMAGE)]);
+			}
+
+			protected function btnZoom_clickHandler(event:MouseEvent):void
+			{
+				this.stop();
+				this.parentApplication.storyboard.showLargePreview(Constants.PREVIEW_MEDIA, _media);
+			}
+
+			private function fileSelectHandler(event:Event):void
+			{
+				event.target.removeEventListener(Event.SELECT, fileSelectHandler);
+
+				// The SWFThumb is having trouble refiring. Call it manually
+				var image:Image = new Image();
+				image.addEventListener(Event.COMPLETE, thumbCompleteHandler);
+				image.load(_thumbFile.url);				
+			}
+			
+			private function thumbCompleteHandler(event:Event):void
+			{
+				_media.thumbBmpData = event.target.content.bitmapData;
+				_thumbBmpData = _media.thumbBmpData;	// This is a bug. It is requiring a refresh to get the new icon
+				swfThumb.load(new Bitmap(_media.thumbBmpData));
+				swfThumb_completeHandler(null);
+				
+				this.dispatchEvent(new Event(THUMB_CHANGE));
+			}
+
+			protected function videoDisplay_mediaPlayerStateChangeHandler(event:MediaPlayerStateChangeEvent):void
+			{
+				switch (event.state)
+				{
+					case MediaPlayerState.BUFFERING:
+						lblBuffering.visible = true;
+						break;
+
+					case MediaPlayerState.PLAYING:
+						lblBuffering.visible = false;
+						videoDisplay.visible = true;
+						swfThumb.visible = false;
+						swfLoading.visible = false;
+						break;
+
+					case MediaPlayerState.PLAYBACK_ERROR:
+						lblBuffering.visible = false;
+						videoDisplay.visible = false;
+						swfThumb.visible = true;
+						swfLoading.visible = false;
+						break;
+
+					case MediaPlayerState.PAUSED:
+						// Not sure why but the VideoDisplay is pausing 
+						// on play
+						if (_playing) {videoDisplay.play();}
+						break;
+
+					default:
+						trace(event.state);
+						lblBuffering.visible = false;
+				}
+			}
+			
+			private function soundStartHandler(event:Event):void
+			{
+				lblProgress.text = "";
+				swfLoading.visible = false;
+				swfThumb.source = imageAudio;
+				swfThumb.visible = true;
+				groupControls.enabled = true;
+			}
+
+			private function soundEndHandler(event:Event):void
+			{
+				btnStop_clickHandler(null);
+			}
+			
+			private function soundProgressHandler(event:Event):void
+			{
+			}
+
+
+			protected function group1_hideHandler(event:FlexEvent):void
+			{
+				btnStop_clickHandler(null);
+			}
+
+		]]>
+	</fx:Script>
+	<mx:SWFLoader id="swfLoading" horizontalCenter="0" verticalCenter="0" width="100" height="100" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>
+	<mx:SWFLoader id="swfThumb" complete="swfThumb_completeHandler(event)" 
+				  ioError="swfThumb_ioErrorHandler(event)" 
+				  autoLoad="false" scaleContent="true" maintainAspectRatio="false" smoothBitmapContent="true"/>
+	
+	<s:Group id="groupPreview" clipAndEnableScrolling="true" width="100%" height="100%" x="0" y="0" >
+		<components:S3SWFLoader id="swfPreview" complete="swfPreview_completeHandler(event)" autoLoad="true"  
+								ioError="swfPreview_ioErrorHandler(event)" maintainProjectionCenter="true"  horizontalCenter="0" verticalCenter="0"/>
+		<s:VideoDisplay id="videoDisplay" width="100%" height="100%" maintainProjectionCenter="true"   mediaPlayerStateChange="videoDisplay_mediaPlayerStateChangeHandler(event)" />
+	</s:Group>
+	
+	<!-- The HTML Control will cover up any controls -->
+	<s:Group id="groupWebPreview" x="0" top="0" bottom="22" width="100%" >
+		<components:WebPlayer id="webPlayer" height="100%" width="100%" />
+	</s:Group>
+	
+	<s:Label id="lblBuffering" text="Buffering" width="100%" alpha=".25" styleName="Buffering" bottom="40"/>
+	<s:Label id="lblProgress" text="" width="100%" alpha=".66"  bottom="40" textAlign="center"/>
+	<s:HGroup id="groupControls" gap="1" height="22" left="0" right="22" bottom="0">
+		<mx:Spacer width="100%" />
+		<components:IconButton id="btnPlay" icon="{iconPlay}" click="btnPlay_clickHandler(event)" />
+		<components:IconButton id="btnPause" icon="{iconPause}"  click="btnPause_clickHandler(event)"/>
+		<components:IconButton id="btnStop" icon="{iconStop}" click="btnStop_clickHandler(event)" enabled="false" />
+		<mx:Spacer width="100%" />
+	</s:HGroup>
+	<components:IconButton id="btnSnapshot" icon="{iconCamera}" right="0"  
+						   click="btnSnapshot_clickHandler(event)" toolTip="Take snapshot for new thumbnail" bottom="0"/>
+	<components:IconButton id="btnSelectThumb" icon="{iconImageEdit}" right="0" 
+						   click="btnSelectThumb_clickHandler(event)" toolTip="Select new thumbnail" bottom="0"/>
+	<components:IconButton id="btnZoom" icon="{iconZoom}" right="0"
+						   click="btnZoom_clickHandler(event)" toolTip="Preview in larger window" bottom="0"/>
+</s:Group>

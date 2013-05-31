@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" width="22" height="22" 
+		 creationComplete="creationCompleteHandler(event)" click="clickHandler(event)" 
+		 chromeColor="#FFFF80" focusColor="#FFFF80" rollOverColor="#FFFFCC" contentBackgroundColor="#FFFF80" backgroundColor="#FFFF80" borderColor="#404040" cornerRadius="1">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			import mx.managers.ToolTipManager;
+
+			public static const CLICKED:String= "CLICKED";
+			
+			[Bindable] [Embed(source="/assets/icons/link.png")]
+			private var iconLock:Class;
+			[Bindable] [Embed(source="/assets/icons/link_break.png")]
+			private var iconUnlock:Class;			
+
+			[Bindable] private var _selected:Boolean = false;
+			
+			public function get selected():Boolean
+			{
+				return _selected;
+			}
+			
+			public function set selected(value:Boolean):void
+			{
+				_selected = value;
+			}
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.toolTip = "Keep aspect ratio";
+			}
+
+			protected function clickHandler(event:MouseEvent):void
+			{
+				_selected = !_selected;
+				
+				this.toolTip = _selected ? "Ignore aspect ratio" : "Keep aspect ratio";
+				
+				this.dispatchEvent(new Event(CLICKED));
+			}
+
+
+			protected function mouseOverHandler(event:MouseEvent):void
+			{
+			}
+
+
+			protected function mouseOutHandler(event:MouseEvent):void
+			{
+			}
+
+		]]>
+	</fx:Script>
+	<mx:Image horizontalCenter="0" verticalCenter="0" id="imgLock" source="{iconLock}" 
+			  scaleContent="false" visible="{!_selected}" smoothBitmapContent="true" />
+	<mx:Image horizontalCenter="0" verticalCenter="0" id="imgUnLock" source="{iconUnlock}" 
+			  scaleContent="false" visible="{_selected}" smoothBitmapContent="true" />
+</s:BorderContainer>

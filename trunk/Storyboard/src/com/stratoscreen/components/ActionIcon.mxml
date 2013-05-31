@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Image xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		  xmlns:mx="library://ns.adobe.com/flex/mx" width="16" height="16" 
+		  creationComplete="creationCompleteHandler(event)" mouseOut="mouseOutHandler(event)" 
+		  mouseOver="mouseOverHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			
+			import spark.filters.DropShadowFilter;
+			
+			private var _outline:spark.filters.DropShadowFilter;
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_outline = new spark.filters.DropShadowFilter();
+				_outline.color = 0xA8C5FF;
+				_outline.alpha = .66;
+				_outline.angle = 0;
+				_outline.blurX = 4;
+				_outline.blurX = 4;
+				_outline.distance = 0;
+				_outline.strength = 4;
+			}
+
+
+			protected function mouseOutHandler(event:MouseEvent):void
+			{
+				this.filters = null;
+			}
+
+
+			protected function mouseOverHandler(event:MouseEvent):void
+			{
+				this.filters = [_outline];
+			}
+
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+</mx:Image>

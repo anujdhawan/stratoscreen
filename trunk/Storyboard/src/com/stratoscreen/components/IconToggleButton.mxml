@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" width="22" height="22">
+	<fx:Script>
+		<![CDATA[			
+			
+			[Bindable] public var icon:Class;
+			[Bindable] public var selected:Boolean;
+			
+			private function clickHandler():void
+			{
+				this.dispatchEvent(new MouseEvent(MouseEvent.CLICK));
+			}
+		]]>
+	</fx:Script>
+	<s:ToggleButton horizontalCenter="0" verticalCenter="0" width="100%" height="100%" click="{clickHandler()}" selected="{selected}" cornerRadius="0"/>
+	<mx:Image horizontalCenter="0" verticalCenter="0" id="imgLock" source="{icon}" scaleContent="false"/>
+</s:Group>

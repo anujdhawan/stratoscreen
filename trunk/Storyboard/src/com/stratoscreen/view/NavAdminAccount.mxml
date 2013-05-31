@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%" 
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Accounts;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.controls.Alert;
+			import mx.events.FlexEvent;
+			
+			private var _appManager:AppManager;
+			private var _shown:Boolean = false;			
+			[Bindable] private var _account:Accounts;
+			[Bindable] private var _defaultDuration:int;
+			[Bindable] private var _isDirty:Boolean = false;
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				
+				//The nav may need a kick start
+				if (btnSave != null) {showHandler(null);}
+			}
+			
+			public function get isDirty():Boolean
+			{
+				return _isDirty;
+			}
+
+
+			protected function showHandler(event:FlexEvent):void
+			{
+				// We have a rendering issue. Allow the screen to catch up
+				this.callLater(loadAccount);
+			}
+			
+			private function loadAccount():void
+			{
+				// Copy the account to avoid overwriting
+				_account = Utils.copyClassObject(Accounts, _appManager.currentAccount);
+				
+			}
+
+			protected function btnCancel_clickHandler(event:MouseEvent):void
+			{
+				showHandler(null);
+				_isDirty = false;
+			}
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				
+				_account.modifiedBy = _appManager.currentUser.itemName;
+				_account.modifiedDate = new Date();
+				_account.updated = true;				
+				_appManager.sdb.updateDomain([_account], updateAccountHandler);
+			}
+			
+			private function updateAccountHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not update Account. Please try again later", "Update Error");
+					showHandler(null);
+					return;
+				}
+				
+				_appManager.currentAccount = _account;
+				_isDirty = false;
+			}
+
+
+
+		]]>
+	</fx:Script>
+	<s:VGroup height="100%" width="100%">
+		<s:BorderContainer height="243" width="100%" styleName="Panel" >
+			<s:Label x="9" y="9" text="Name" fontWeight="bold" />
+			<s:TextInput maxChars="25" id="txtName" y="5" text="@{_account.name}" width="370" 
+						  x="114" change="{_isDirty=true}"/>
+			<s:Label x="9" y="34" text="Company" fontWeight="bold"/>
+			<s:TextInput maxChars="50" id="txtCompanyName" y="34" text="@{_account.companyName}" 
+						 width="370"  x="114" change="{_isDirty=true}"/>
+			<s:Label x="9" y="62" text="Address" fontWeight="bold"/>
+			<s:TextInput maxChars="100" id="txtAddress1" y="62" text="@{_account.address1}" 
+						 width="370"  x="114" change="{_isDirty=true}"/>
+			<s:TextInput maxChars="100" id="txtAddress2" y="90" text="@{_account.address2}" 
+						 width="370"  x="114" change="{_isDirty=true}"/>
+			<s:TextInput maxChars="50" id="txtCity" y="118" text="@{_account.city}" width="251" x="114" change="{_isDirty=true}"/>
+			<s:TextInput maxChars="2" id="txtState" y="118" text="@{_account.state}" restrict="A-Za-z" 
+						 width="36"  x="373"  typographicCase="uppercase" change="{_isDirty=true}"/>
+			<s:TextInput maxChars="10" id="txtZip" y="118" text="@{_account.zip}" restrict="0-9\-" width="67" x="417" change="{_isDirty=true}"/>
+			<s:TextInput maxChars="50" id="txtPhone" y="146" text="@{_account.phone}" width="295"  x="114" change="{_isDirty=true}"/>
+			<s:Label x="9" y="148" text="Phone" fontWeight="bold"/>
+			<s:Label x="9" y="178" text="Contact Name" fontWeight="bold"/>
+			<s:TextInput maxChars="50" id="txtContactName" y="174" text="@{_account.contactName}" 
+						 width="295"  x="114" change="{_isDirty=true}"/>
+			<s:Label x="9" y="206" text="Contact Email" fontWeight="bold"/>
+			<s:TextInput maxChars="50" id="txtContactEmail" y="202" text="@{_account.email}" width="295" 
+						  x="114" change="{_isDirty=true}"/>
+		</s:BorderContainer>
+		
+		<mx:Spacer height="25" />
+		<s:HGroup>
+			<s:Button label="Save" id="btnSave" enabled="{_isDirty}" click="btnSave_clickHandler(event)"/>
+			<s:Button label="Cancel" id="btnCancel" enabled="{_isDirty}" click="btnCancel_clickHandler(event)"/>
+		</s:HGroup>
+
+	</s:VGroup>
+</s:NavigatorContent>

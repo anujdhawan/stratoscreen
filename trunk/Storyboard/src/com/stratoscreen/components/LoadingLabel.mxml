@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Label xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" text="{_text}" 
+		 creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			
+			private const MAX_DOTS:int = 5;
+
+			[Bindable] private var _text:String = "";
+
+			private var _timer:Timer;
+			private var _count:int = 0;
+			
+			public override function get text():String
+			{
+				if (_timer == null || _timer.running) {return "";}
+				return _text;	
+			}
+			
+			public override function set text(value:String):void
+			{
+				_timer.stop();
+				_text = value;
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_timer = new Timer(333);
+				_timer.addEventListener(TimerEvent.TIMER, timerHandler);
+				_timer.start();
+			}
+			
+			private function timerHandler(event:TimerEvent):void
+			{
+				_count ++;
+				if (_count >= MAX_DOTS) 
+				{
+					_count = 0;
+					_text = "";
+				}				
+				
+				_text += "."
+			}
+		]]>
+	</fx:Script>
+</s:Label>

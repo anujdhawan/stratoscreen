@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:HGroup xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+		  xmlns:mx="library://ns.adobe.com/flex/mx" height="26" verticalAlign="middle" 
+		  creationComplete="creationCompleteHandler(event)" width="220" >
+	<fx:Script>
+		<![CDATA[
+		import mx.events.NumericStepperEvent;
+		
+		public static const DURATION_CHANGE:String = "DURATION_CHANGE";
+			
+		private var _duration:Number;
+		[Bindable] private var _enabled:Boolean = true;
+		[Bindable] private var _errorString:String = "";
+		
+		public override function set enabled(value:Boolean):void
+		{
+			super.enabled = value;
+			_enabled = value;
+		}
+			
+		public override function set errorString(value:String):void
+		{
+			_errorString = value;
+		}
+			
+		public override function get errorString():String
+		{
+			return _errorString;
+		}
+		
+		public function get duration():Number
+		{
+			return _duration;
+		}
+		
+		public function set duration(value:Number):void
+		{
+			_duration = value;
+			
+			if (stepMinute != null && stepSecond != null) {setStepper();}
+		}
+		
+		protected function creationCompleteHandler(event:Event):void
+		{
+			setStepper();
+		}
+		
+		private function setStepper():void
+		{
+			var minutes:int = Math.floor(_duration / 60);
+			var seconds:int = _duration - minutes * 60;
+			
+			stepMinute.value = minutes;
+			stepSecond.value = seconds;
+		}			
+		
+		
+		protected function changeHandler(event:Event):void
+		{
+			_duration = stepMinute.value * 60 + stepSecond.value;
+			this.dispatchEvent(new Event(DURATION_CHANGE));
+		}
+		
+			
+		]]>
+	</fx:Script>
+	<s:Label id="lblMinute" x="0" y="0" text="Minutes" enabled="{_enabled}"/>
+	<s:NumericStepper id="stepMinute"  maximum="99" change="changeHandler(event)" enabled="{_enabled}" errorString="{_errorString}"/>
+	<s:Label id="lblSecond" x="0" y="0" text="Seconds" enabled="{_enabled}"/>
+	<s:NumericStepper id="stepSecond" maximum="59" minimum="0" change="changeHandler(event)" enabled="{_enabled}"  errorString="{_errorString}"/>
+</s:HGroup>

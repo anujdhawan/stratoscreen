@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*" 
+				autoDrawBackground="true" width="128" height="96" doubleClickEnabled="true" doubleClick="doubleClickHandler(event)"
+				creationComplete="creationCompleteHandler(event)">	
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.ImageCacheManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.Overlays;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.view.Storyboard;
+			import com.stratoscreen.view.WinSelectMediaGroup;
+			
+			import mx.events.FlexEvent;
+
+			private static const DETAIL_HEIGHT:int = 135;
+
+			[Bindable][Embed(source="/assets/icons/arrow_switch_down.png")]
+			private static var iconRandom:Class;
+			[Bindable][Embed(source="/assets/icons/arrow_down.png")]
+			private static var iconSeq:Class;
+			[Bindable][Embed(source="/assets/images/paperClip.png")]
+			
+			private static var imageClip:Class;
+			
+			private var _imageUtils:ImageUtils;
+			private var _appManager:AppManager;
+			
+			public static var bucket:String;
+			public static var S3Endpoint:String;
+			private static var _storyboard:Storyboard;
+
+			[Bindable] private var _overlay:Overlays;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.data = _overlay;		// Draw the renderer
+				_storyboard = this.parentApplication.storyboard;
+				_appManager = this.parentApplication.appManager;
+				_imageUtils = new ImageUtils();
+			}
+			
+			public override function set data(value:Object):void
+			{
+				if (super.data == value) {return;}	// Renderer has not changed				
+				super.data = value;
+				if (!value is Overlays) {return;}
+				
+				_overlay = value as Overlays;
+				
+				var thumbUrl:String = "https://" + S3Endpoint + "/" + bucket;
+				thumbUrl += "/" + Constants.THUMB_PREFIX + _overlay.baseMediaId + Constants.THUMB_EXTENSION; 
+				imgThumb.source = ImageCacheManager.getInstance().getImageByURL(thumbUrl);
+				imgThumb.load();
+				swfLoading.visible = true;
+				rect1.visible = false;
+				rect2.visible = false;
+				rect3.visible = false;
+				imgClip.visible = false;
+			}
+
+			protected function imgThumb_completeHandler(event:Event):void
+			{
+				swfLoading.visible = false;
+				var rect:ResizeRectangle = _imageUtils.getBestFit(event.target.content.width, event.target.content.height, 
+					                                             groupThumb.width - 6, groupThumb.height - 6);
+				imgThumb.x = rect.x;
+				imgThumb.y = rect.y;
+				imgThumb.width = rect.width;
+				imgThumb.height = rect.height;
+
+				imgOverlayImage.visible = true;
+				imgOverlayImage.x = rect.x + 6;
+				imgOverlayImage.y = rect.y + 6;			
+				
+				imgOverlay.visible = true;
+				imgOverlay.x = rect.x + rect.width - imgOverlay.width - 4;
+				imgOverlay.y = rect.y  + rect.height - imgOverlay.height - 4;							
+				
+				rect1.x = rect.x + 4;
+				rect1.y = rect.y + 4;
+				rect1.width = rect.width;
+				rect1.height = rect.height;
+				rect1.visible = true;
+
+				rect2.x = rect.x + 2;
+				rect2.y = rect.y + 2;
+				rect2.width = rect.width;
+				rect2.height = rect.height;				
+				rect2.visible = true;
+				
+				rect3.x = rect.x;
+				rect3.y = rect.y;
+				rect3.width = rect.width;
+				rect3.height = rect.height;				
+				rect3.visible = true;
+				
+				imgClip.x = rect.x + 7;
+				imgClip.y = groupThumb.y + rect.y - 10;
+				imgClip.visible = true;
+			}
+
+
+			protected function itemClickHandler(event:MouseEvent):void
+			{
+				_storyboard.navMedia.navMediaGroupOverlay.itemClick(this);
+			
+				event.stopImmediatePropagation();
+			}
+			
+			protected function doubleClickHandler(event:MouseEvent):void
+			{
+				// open the detail
+				_storyboard.navMedia.navMediaGroupOverlay.itemClick(this);
+				
+				if (_appManager.currentUser.type == Constants.USER_TYPE_MANAGER || _overlay.createdBy == _appManager.currentUser.itemName)
+				{
+					_storyboard.navMedia.navMediaGroupOverlay.overlayDetail.editOverlay();
+				}
+			}			
+
+		]]>
+	</fx:Script>
+	<mx:SWFLoader id="swfLoading" horizontalCenter="2" verticalCenter="-4" width="50%" height="50%" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>
+	<s:Group id="groupThumb" x="0" y="9" width="128" height="71" click="itemClickHandler(event)">
+		<s:Rect id="rect1" width="20" height="20" x="2" y="2">
+			<s:stroke>
+				<s:SolidColorStroke color="0x606060" weight="1"/>
+			</s:stroke>			
+			<s:fill>
+				<s:LinearGradient rotation="45">
+					<s:entries>
+						<s:GradientEntry color="0xF0F0F0" ratio=".50"/>
+					</s:entries>					
+				</s:LinearGradient>			
+			</s:fill>
+		</s:Rect>
+		<s:Rect id="rect2" width="20" height="20" x="4" y="4">
+			<s:stroke>
+				<s:SolidColorStroke color="0x6006060" weight="1"/>
+			</s:stroke>			
+			<s:fill>
+				<s:LinearGradient rotation="45">
+					<s:entries>
+						<s:GradientEntry color="0xF0F0F0" ratio=".50"/>
+					</s:entries>					
+				</s:LinearGradient>			
+			</s:fill>
+		</s:Rect>
+		<s:Rect id="rect3" width="20" height="20" x="4" y="4">
+			<s:stroke>
+				<s:SolidColorStroke color="0x606060" weight="1"/>
+			</s:stroke>			
+			<s:fill>
+				<s:LinearGradient rotation="45">
+					<s:entries>
+						<s:GradientEntry color="0xFFFFFF" ratio=".50"/>
+						<s:GradientEntry color="0xF0F0F0" ratio=".50"/>
+					</s:entries>					
+				</s:LinearGradient>			
+			</s:fill>			
+		</s:Rect>
+		<mx:Image id="imgThumb" complete="imgThumb_completeHandler(event)" click="itemClickHandler(event)" />
+		<mx:Image id="imgOverlay" scaleContent="false"  source="@Embed('/assets/images/overlay.png')" click="itemClickHandler(event)" />		
+		<mx:Image id="imgOverlayImage" scaleContent="false"  source="@Embed('/assets/images/overlayImage.png')" click="itemClickHandler(event)" />		
+	</s:Group>
+	<mx:Image id="imgClip" source="{imageClip}" scaleContent="false" />	
+	<s:Label id="lblName" text="{_overlay.name}"  left="16" bottom="1" right="0" height="16" textAlign="center" click="itemClickHandler(event)" verticalAlign="middle" maxDisplayedLines="1"/>
+	<components:ActionIcon id="imgType" height="16" width="16"  left="0" bottom="0" source="" click="itemClickHandler(event)"/>
+</s:ItemRenderer>

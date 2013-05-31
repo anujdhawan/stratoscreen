@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx"  xmlns:components="com.stratoscreen.components.*"
+		  height="135" contentBackgroundAlpha="0.0"	 creationComplete="creationCompleteHandler(event)" 
+		 hide="hideHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Channels;
+			import com.stratoscreen.model.views.CountRows;
+			
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.formatters.DateFormatter;
+			import mx.managers.PopUpManager;
+			
+			public static const DETAIL_CLOSE:String = "DETAIL_CLOSE";
+			public static const CHANNEL_DELETE:String = "CHANNEL_DELETE";
+			public static const CHANNEL_EDIT:String = "CHANNEL_EDIT";
+			
+			[Bindable][Embed(source="/assets/icons/cross.png")]
+			private var iconClose:Class;
+
+			[Bindable] private var _channel:Channels;
+			[Bindable] private var _canEdit:Boolean = false;;			
+			private var _appManager:AppManager;
+			
+			public function get channel():Channels
+			{
+				return _channel;
+			}
+			
+			public function set channel(value:Channels):void
+			{
+				_channel = value;
+				if (_channel == null) {return;}
+				if (groupMain == null) {return;}	//still renedering
+				
+				_canEdit = _appManager.currentUser.type == Constants.USER_TYPE_MANAGER || _channel.createdBy == _appManager.currentUser.itemName;
+				var formatter:DateFormatter = new DateFormatter();
+				formatter.formatString = "MMM D, YYYY";
+				lblCreated.text = formatter.format(_channel.createdDate);					
+				lblModified.text = formatter.format(_channel.modifiedDate);
+				
+				// Find the user who owns this item
+				for (var i:int = 0; i < _appManager.usersHdrs.length; i++)
+				{
+					if (_appManager.usersHdrs[i].itemName == _channel.createdBy)
+					{
+						lblCreatedBy.text = _appManager.usersHdrs[i].firstName + " " + 
+							                _appManager.usersHdrs[i].lastName;
+					}
+					
+					if (_appManager.usersHdrs[i].itemName == _channel.modifiedBy)
+					{
+						lblModifiedBy.text = _appManager.usersHdrs[i].firstName + " " + 
+							                 _appManager.usersHdrs[i].lastName;
+					}
+				}								
+			}
+			
+			public function editChannel():void
+			{
+				linkEdit_clickHandler(null);	
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+			
+			protected function hideHandler(event:FlexEvent):void
+			{
+				channelPlayer.stop();
+			}
+
+			
+			protected function btnClose_clickHandler(event:MouseEvent):void
+			{
+				this.dispatchEvent(new Event(DETAIL_CLOSE));
+			}
+			
+			protected function linkEdit_clickHandler(event:MouseEvent):void
+			{
+				this.dispatchEvent(new Event(CHANNEL_EDIT));
+			}
+			
+			protected function linkDelete_clickHandler(event:MouseEvent):void
+			{
+				this.dispatchEvent(new Event(CHANNEL_DELETE));
+			}
+
+
+		]]>
+	</fx:Script>
+	<s:BorderContainer styleName="DetailBand" left="1" top="1" right="1" bottom="1" >
+		<s:HGroup id="groupMain" width="100%" height="100%" verticalAlign="middle">
+			<mx:Spacer width="0" />
+			<components:ChannelPlayer id="channelPlayer" height="{this.height-6}" width="150" channel="{_channel}" viewMode="L" />
+			
+			<s:Line rotation="90" height="90%" >
+				<s:stroke>
+					<s:SolidColorStroke color="#3E63C1" weight="1" />
+				</s:stroke>				
+			</s:Line>			
+			<s:Group height="100%" >
+				<s:Label x="0" y="10" text="Name" fontWeight="bold"/>
+				<s:Label x="50" y="10" text="{_channel.name}"/>
+				<s:Label x="0" y="32" text="Size" fontWeight="bold"/>
+				
+			</s:Group>
+			<mx:Spacer width="10" />
+			<s:Group height="100%" >
+				<s:Label x="0" y="10" text="Created" fontWeight="bold"/>
+				<s:Label x="75" y="10" text=" " id="lblCreated"/>
+				<s:Label x="0" y="32" text="Created by" fontWeight="bold"/>
+				<s:Label x="75" y="32" text=" " id="lblCreatedBy"/>
+				<s:Label x="0" y="54" text="Modified" fontWeight="bold"/>
+				<s:Label x="75" y="54" text=" " id="lblModified"/>
+				<s:Label x="0" y="76" text="Modified by" fontWeight="bold"/>
+				<s:Label x="75" y="76" text=" " id="lblModifiedBy"/>
+			</s:Group>		
+			<mx:Spacer width="100%" />
+			<s:VGroup height="100%" maxWidth="135" paddingBottom="2" paddingLeft="2" paddingRight="2" paddingTop="2" textAlign="right">				
+				<s:HGroup width="100%">
+					<mx:Spacer width="100%" />
+					<components:IconButton id="btnClose" click="btnClose_clickHandler(event)" icon="{iconClose}" />
+				</s:HGroup>
+				<mx:Spacer height="100%" />
+				<components:IconButton label="Edit Channel" id="linkEdit" icon="@Embed(source='/assets/icons/pencil.png')" width="{linkDelete.width}" 
+							   click="linkEdit_clickHandler(event)" enabled="{_canEdit}"/>
+				<components:IconButton label="Delete Channel" id="linkDelete" icon="@Embed(source='/assets/icons/delete.png')" width="100%" 
+							   click="linkDelete_clickHandler(event)" enabled="{_canEdit}" isDelete="true"/>
+			</s:VGroup>
+		</s:HGroup>
+	</s:BorderContainer>
+</s:Group>

@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+				   xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="160" styleName="Panel"  
+				   creationComplete="creationCompleteHandler(event)" xmlns:components="com.stratoscreen.components.*">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.ScreenDetail;
+			import com.stratoscreen.model.domains.Screens;
+			import com.stratoscreen.model.views.CountRows;
+			import com.stratoscreen.model.views.MediaSizes;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.charts.HitData;
+			import mx.collections.ArrayCollection;
+			import mx.events.FlexEvent;
+			
+			private const ROW_MEDIA_COUNT:int = 0;
+			private const ROW_MEDIA_SIZE:int = 1;
+			private const ROW_BANDWIDTH:int = 2;
+			private const ROW_SCREENS:int = 3;
+
+			[Bindable][Embed(source="/assets/icons/arrow_refresh.png")]
+			private var iconRefresh:Class;	
+			
+			[Bindable] private var _percents:ArrayCollection;
+			[Bindable] private var _tooltip:String;
+			private var _medias:Array;
+			private var _screenDetail:Array;
+			private var _screenCount:int;
+			private var _activeScreenCount:int;
+			private var _appManager:AppManager;
+			private var _activeScreensLoaded:Boolean = false;
+			private var _screensLoaded:Boolean = false;
+			private var _screenDetailLoaded:Boolean = false;
+			private var _mediasLoaded:Boolean = false;
+			private var _mediaCount:int = 0;
+			private var _mediaSize:Number = 0;
+			private var _usedBandwidth:Number;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				loadSummaries();;
+			}
+
+			private function btnRefresh_clickHandler(event:Event):void
+			{
+				loadSummaries();
+			}
+			
+			protected function loadSummaries():void
+			{
+				this.enabled = false;
+				_tooltip = "";
+				
+				var sql:String = "Select mimeType, size from Medias where accountId='";
+				sql += _appManager.currentAccount.itemName + "'";				
+				_appManager.sdb.select(sql, queryMediaHandler, MediaSizes);
+				
+				sql = "Select count(*) from Screens where accountId='";
+				sql += _appManager.currentAccount.itemName + "'";				
+				_appManager.sdb.select(sql, queryScreensHandler, CountRows);
+
+				// Get the active screens
+				sql = "Select count(*) from Screens where accountId='";
+				sql += _appManager.currentAccount.itemName + "' and ";
+				sql	+= "status = '" + Screens.STATUS_ACTIVE + "'";				
+				_appManager.sdb.select(sql, queryActiveScreensHandler, CountRows);
+
+				sql = "Select * from ScreenDetail where accountId='";
+				sql += _appManager.currentAccount.itemName + "'";				
+				_appManager.sdb.select(sql, queryScreenDetailHandler, ScreenDetail);
+			}
+			
+			private function queryMediaHandler(event:SDBEvent):void
+			{
+				if (!event.success) 
+				{
+					_tooltip = "Error retriving Media summary. Please refresh later";
+					this.enabled = true;
+					return;	
+				}
+
+				_medias = event.result as Array;
+				_mediasLoaded = true;
+				buildArray();
+			}	
+			
+			private function queryScreensHandler(event:SDBEvent):void
+			{
+				if (!event.success) 
+				{
+					_tooltip = "Error retriving Screen summary. Please refresh later";
+					this.enabled = true;
+					return;	
+				}
+				
+				_screenCount = parseInt(event.result[0].Count);
+				_screensLoaded = true;
+				buildArray();
+			}
+			
+			private function queryActiveScreensHandler(event:SDBEvent):void
+			{
+				if (!event.success) 
+				{
+					_tooltip = "Error retriving active Screen summary. Please refresh later";
+					this.enabled = true;
+					return;	
+				}
+				
+				_activeScreenCount = parseInt(event.result[0].Count);
+				_activeScreensLoaded = true;
+				buildArray();
+			}
+			
+			private function queryScreenDetailHandler(event:SDBEvent):void
+			{
+				if (!event.success) 
+				{
+					_tooltip = "Error retriving Screen Detail. Please refresh later";
+					this.enabled = true;
+					return;	
+				}
+				
+				_screenDetail = event.result as Array;
+				_screenDetailLoaded = true;
+				buildArray();
+			}
+			
+			private function buildArray():void
+			{
+				if (!_activeScreensLoaded || !_screensLoaded ||  !_mediasLoaded || !_screenDetailLoaded) {return;}
+				//if (!_activeScreensLoaded ||  !_mediasLoaded || !_screenDetailLoaded) {return;}
+				
+				// Build the summary array for the sizes and counts
+				_tooltip = "";
+				this.enabled = true;
+				
+				_mediaCount = 0;
+				_mediaSize = 0;
+				
+				for each (var media:MediaSizes in _medias)
+				{
+					_mediaCount++;
+					_mediaSize += parseFloat(media.size);
+				}
+				
+				
+				// Save the values to the Appmanager. We can use later to limit the uploads
+				_appManager.currentScreenCount = _screenCount;
+				_appManager.currentMediasCount = _mediaCount;
+				_appManager.currentMediasSize = _mediaSize;
+				
+				// Create the array
+				_percents = new ArrayCollection();
+				var item:Object
+				
+				item = new Object();
+				item.label = "Media Count";
+				item.type = ROW_MEDIA_COUNT;				
+				item.value = _mediaCount / parseInt(_appManager.currentAccount.mediasCount) * 100;
+				_percents.addItem(item);
+				
+				item = new Object();
+				item.label = "Media Size";
+				item.type = ROW_MEDIA_SIZE;
+				item.value = _mediaSize / parseInt(_appManager.currentAccount.mediasSize) * 100;
+				_percents.addItem(item);
+				
+				if (_screenCount > 0 && (_appManager.currentAccount.licenseCountInt + _appManager.currentAccount.paidLicenseCount ) > 0)
+				{
+					item = new Object();
+					item.label = "Screens";
+					item.type = ROW_SCREENS;
+					item.value = _screenCount / (_appManager.currentAccount.licenseCountInt + _appManager.currentAccount.paidLicenseCount ) * 100;
+					_percents.addItem(item);
+				}
+				
+				item = new Object();
+				item.label = "Monthly Bandwidth";
+				item.type = ROW_BANDWIDTH;
+				item.value = getBandwidthPercent();
+				_percents.addItem(item);					
+
+			}
+			
+			private function labelPercent(item:Object, prevValue:Object, axis:Object):String
+			{
+				return item.toString() + "%";
+			}
+			
+			private function getBandwidthPercent():Number
+			{
+				if (_activeScreenCount == 0) {return 0;}
+				
+				var totalBandwidth:Number = parseFloat(_appManager.currentAccount.bandwidth);
+				totalBandwidth *= _activeScreenCount;
+				
+				_usedBandwidth = 0;
+				for each (var detail:ScreenDetail in _screenDetail)
+				{
+					var screenBandwidth:Number = parseFloat(detail.bandwidth);
+					if (!isNaN(screenBandwidth)) {_usedBandwidth += screenBandwidth;}
+				}
+				
+				return _usedBandwidth / totalBandwidth * 100;
+			}
+			
+			private function dataTipFunction(item:HitData):String
+			{
+				switch (item.item.type)
+				{
+					case ROW_MEDIA_COUNT:
+						return _mediaCount.toString();
+						break;
+					
+					case ROW_MEDIA_SIZE:
+						return Utils.formatBytes(_mediaSize);
+						break;
+					
+					case ROW_SCREENS:
+						return _screenCount.toString();
+						break;
+
+					case ROW_BANDWIDTH:
+						return Utils.formatBytes(_usedBandwidth);
+						break;
+
+				}
+				
+				return "";
+			}
+		]]>
+	</fx:Script>
+	<s:Label x="10" y="10" text="Quota Summary" fontWeight="bold" fontSize="11"/>
+	<components:IconButton id="btnRefresh" icon="{iconRefresh}" toolTip="Refresh data"
+						   click="btnRefresh_clickHandler(event)"  right="5" top="5"/>
+
+	<mx:BarChart dataProvider="{_percents}" left="10" top="30" bottom="7" right="10" seriesFilters="[]" toolTip="{_tooltip}"
+				 dataTipFunction="dataTipFunction" showDataTips="true" >		
+		<mx:verticalAxis>
+			<mx:CategoryAxis categoryField="label"  />
+		</mx:verticalAxis> 
+		<mx:horizontalAxis>
+			<mx:LinearAxis maximum="100" baseAtZero="true" interval="25" labelFunction="labelPercent" />	
+		</mx:horizontalAxis>
+		<mx:series>
+			<mx:BarSet >
+				<mx:BarSeries id="barSeries" xField="value" displayName="Percentage Used" itemRenderer="com.stratoscreen.renderers.BarQuota"  />
+			</mx:BarSet>
+		</mx:series>
+	</mx:BarChart>
+</s:BorderContainer>
+

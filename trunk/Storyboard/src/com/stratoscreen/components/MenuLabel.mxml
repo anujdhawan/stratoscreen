@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:HGroup xmlns:fx="http://ns.adobe.com/mxml/2009"
+		  xmlns:s="library://ns.adobe.com/flex/spark"
+		  xmlns:mx="library://ns.adobe.com/flex/mx"
+		  width="125" verticalAlign="middle" paddingLeft="2" paddingRight="0" gap="2">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			
+			[Bindable] public var icon:Object;
+			[Bindable] public var text:String;
+			[Bindable] public var showMore:Boolean = false;
+			
+		]]>
+	</fx:Script>
+	<s:Image source="{icon}" height="16" width="16" alpha="{enabled ? 1 : .66}"  />
+	<s:Spacer />
+	<s:Label text="{text}" width="100%" maxDisplayedLines="1" alpha="{enabled ? 1 : .66}" />
+	<s:Image visible="{showMore}" alpha="{enabled ? 1 : .66}" source="@Embed('assets/icons/arrow_more.png')" height="12" width="8"/> 
+</s:HGroup>

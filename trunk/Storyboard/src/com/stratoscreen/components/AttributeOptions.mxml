@@ -1,0 +1,1015 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:VGroup xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark"
+		  xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*"
+		  horizontalAlign="center" verticalAlign="middle" 
+		  creationComplete="this_creationCompleteHandler(event)" addedToStage="this_addedToStageHandler(event)"  >	
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.EffectsManager;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			import com.stratoscreen.view.WinOverlayEdit;
+			
+			import mx.events.ColorPickerEvent;
+			import mx.events.FlexEvent;
+			
+			import spark.events.IndexChangeEvent;
+			import spark.events.TextOperationEvent;
+			import spark.filters.DropShadowFilter;
+			
+			public static var lastAttributeOptions:AttributeOptions;
+			private static var _openMenu:PopUpAnchor;
+			private static var _openSubMenu:PopUpAnchor;
+			
+			[Bindable] public var buttonOnly:Boolean = false;
+			
+			[Bindable] private var _overlayDetail:OverlayDetail;
+			[Bindable] private var _selected:Boolean = false;
+
+			private var _winOverlayEdit:WinOverlayEdit;
+			private var _aspectRatio:Number = 1;
+			private var _baseIsSWF:Boolean = false;
+			private var _outline:spark.filters.DropShadowFilter;
+			
+			public function set baseIsSWF(value:Boolean):void
+			{
+				_baseIsSWF = value;
+				
+				// Set the current state if needed
+				if (_overlayDetail != null) {this.overlayDetail =  _overlayDetail;}
+			}
+
+			public override function set visible(value:Boolean):void
+			{				
+				if (_selected) {return;}
+				
+				// Outline the object since if it is locked
+				var isVisible:Boolean = value && overlayDetail.lockedBool;
+				this.parentDocument.groupMain.setStyle("borderVisible", isVisible);
+				
+				super.visible = value;
+			}
+			
+			protected function imgGear_mouseOutHandler(event:MouseEvent):void
+			{
+				if (!buttonOnly) {return;}
+				
+				imgGear.filters = null;
+			}
+			
+			protected function imgGear_mouseOverHandler(event:MouseEvent):void
+			{
+				if (!buttonOnly) {return;}
+				
+				imgGear.filters = [_outline];
+			}
+			
+			protected function imgGear_clickHandler(event:MouseEvent):void
+			{
+				this.dispatchEvent(new MouseEvent(MouseEvent.CLICK));
+			}
+
+
+			[Bindable] public function get overlayDetail():OverlayDetail
+			{
+				return _overlayDetail;
+			}
+			
+			public function set overlayDetail(value:OverlayDetail):void
+			{
+				_overlayDetail = value;
+				
+				if (btnSelect == null) {return;} // Still renderering
+				
+				switch (_overlayDetail.type)
+				{
+					case OverlayDetail.TYPE_MEDIA:
+						this.currentState = "media";
+						break;
+
+					case OverlayDetail.TYPE_TEXT:
+						this.currentState = "text";
+						break;
+				}
+				
+				// Check to see if the base is a SWF. 
+				// We have extra options
+				if (_baseIsSWF) {this.currentState += "SWFBase";}
+								
+				// Set the Aspect Ration. It will be used for sizing
+				if (_overlayDetail.maintainAspectBool) {_aspectRatio = parseFloat(_overlayDetail.width) / parseFloat(_overlayDetail.height)} 
+			}
+			
+			public function unSelect():void
+			{
+				if (popupMain.displayPopUp)	{closeMenus();}
+
+				_selected = false;
+				btnSelect.setStyle("backgroundColor", "#00FF00");
+				imgGear.setStyle("horizontalCenter","0");
+				imgGear.setStyle("verticalCenter","0");
+			}
+
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				this.overlayDetail = _overlayDetail;	// Render for the first time
+				
+				_winOverlayEdit = this.parentApplication.appManager.currentEditWindow;
+				
+				_outline = new spark.filters.DropShadowFilter();
+				_outline.color = 0xA8C5FF;
+				_outline.alpha = .66;
+				_outline.angle = 0;
+				_outline.blurX = 4;
+				_outline.blurX = 4;
+				_outline.distance = 0;
+				_outline.strength = 4;
+			}
+			
+			protected function this_addedToStageHandler(event:Event):void
+			{
+				this.stage.addEventListener(KeyboardEvent.KEY_DOWN, stageKeyDownHandler, false, 0, true);
+			}
+			
+			private function stageKeyDownHandler(event:KeyboardEvent):void
+			{
+				if (event.keyCode == Keyboard.ESCAPE)
+				{
+					if (_openSubMenu != null)
+					{
+						_openSubMenu.displayPopUp = false;
+						_openSubMenu = null;
+					}
+					else if (_openMenu != null)
+					{
+						_openMenu.displayPopUp = false;
+						_openMenu = null;
+					}
+					else
+					{
+						lastAttributeOptions.unSelect();
+					}
+					
+					event.preventDefault();
+					event.stopImmediatePropagation();
+				}
+			}
+
+			
+			protected function btnSelect_mouseOverHandler(event:MouseEvent):void
+			{
+				if (!_selected) 
+				{
+					btnSelect.setStyle("backgroundColor", "#80FF80");
+				}				
+			}
+			
+			protected function btnSelect_mouseOutHandler(event:MouseEvent):void
+			{
+				if (!_selected) 
+				{
+					btnSelect.setStyle("backgroundColor", "#00FF00");
+				}				
+			}
+			
+			protected function btnSelect_clickHandler(event:MouseEvent):void
+			{
+				_selected = !_selected;
+				
+				// Reset the graphic
+				if (_selected) 
+				{
+					if (!buttonOnly)
+					{
+						btnSelect.setStyle("backgroundColor", "#00CC00");	
+						imgGear.setStyle("horizontalCenter","1");
+						imgGear.setStyle("verticalCenter","1");
+					}
+					
+					// Close any lingering menus
+					if (lastAttributeOptions != null && lastAttributeOptions != this) {lastAttributeOptions.unSelect()}
+										
+					popupMain.displayPopUp = true;
+					menuLock.selected = overlayDetail.lockedBool;
+					menuAspect.selected = overlayDetail.maintainAspectBool;
+					
+					lastAttributeOptions = this;
+				}
+				else
+				{
+					if (!buttonOnly)
+					{	
+						btnSelect.setStyle("backgroundColor", "#00FF00");
+						imgGear.setStyle("horizontalCenter","0");
+						imgGear.setStyle("verticalCenter","0");
+					}
+					
+					closeMenus();
+				}
+				
+				if (event != null) {event.stopImmediatePropagation();}
+			}
+			
+			public function closeMenus(popupMenu:PopUpAnchor = null):void
+			{
+				_openMenu = popupMenu;
+				
+				// If an argument is passed only open menus 				
+				if (popupMenu == null) {popupMain.displayPopUp = false;}
+				
+				if (popupAlpha != null && popupAlpha != popupMenu) {popupAlpha.displayPopUp = false;}
+				if (popupText != null && popupText != popupMenu) {popupText.displayPopUp = false;}
+				if (popupLayers != null && popupLayers != popupMenu) {popupLayers.displayPopUp = false;}
+				if (popupEffects != null && popupEffects != popupMenu) {popupEffects.displayPopUp = false;}
+				
+				if (popupFilters != null && popupFilters != popupMenu) 
+				{
+					popupFilters.displayPopUp = false;
+					closeSubMenus();
+				}
+				
+				if (popupTransform != null && popupTransform != popupMenu) 
+				{
+					// Commit any open values
+					//if (popupTransform.displayPopUp) {position_changeHandler(null);}
+					popupTransform.displayPopUp = false;
+				}
+				
+				var popupPlayTimesWasVisible:Boolean = popupPlayTimes != null && popupPlayTimes.displayPopUp;
+				if (popupPlayTimes != null && popupPlayTimes != popupMenu) 
+				{
+					popupPlayTimes.displayPopUp = false;
+					if (!popupPlayTimesWasVisible) {return;}
+					
+					durStart.removeEventListener(Duration.DURATION_CHANGE, durationChangeHandler);
+					durEnd.removeEventListener(Duration.DURATION_CHANGE, durationChangeHandler);
+					
+					// Clean up the code too
+					// We cannot have Times and Frames with non zero
+					if (_baseIsSWF)
+					{
+						if (radTime.selected)
+						{
+							_overlayDetail.startFrame = "0";
+							_overlayDetail.endFrame = "0";
+						}
+						else
+						{
+							_overlayDetail.startTime = "0";
+							_overlayDetail.endTime = "0";
+						}
+					}
+					else
+					{
+						_overlayDetail.startFrame = "0";
+						_overlayDetail.endFrame = "0";
+					}
+				}
+			}
+			
+			private function closeSubMenus(popupMenu:PopUpAnchor = null):void
+			{
+				_openSubMenu = popupMenu;
+
+				if (popupFilterShadow != null && popupFilterShadow != popupMenu) {popupFilterShadow.displayPopUp = false;}
+				if (popupFilterGlow != null && popupFilterGlow != popupMenu) {popupFilterGlow.displayPopUp = false;}				
+			}
+			
+			protected function menuTransform_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				closeMenus(popupTransform);
+				popupTransform.displayPopUp = !popupTransform.displayPopUp;		
+			}
+			
+			protected function transform_changeHandler(event:Event):void
+			{
+				if (_overlayDetail.maintainAspectBool)
+				{
+					if (event.currentTarget == txtWidth)
+					{
+						if (parseFloat(txtWidth.text) == 0 || isNaN(parseFloat(txtWidth.text)))
+						{
+							_overlayDetail.height = txtWidth.text;	// Set to 1 x 1 on first call 
+						}
+						else
+						{
+							_overlayDetail.height = (parseFloat(txtWidth.text) / _aspectRatio).toFixed(1);
+						}
+					}
+
+					if (event.currentTarget == txtHeight)
+					{
+						_overlayDetail.width = (parseFloat(txtHeight.text) * _aspectRatio).toFixed(1);
+					}
+				}
+				
+				var sizeChange:Boolean = event.currentTarget == txtWidth || event.currentTarget == txtHeight;			
+				
+				_winOverlayEdit.changeItemPosition(_overlayDetail, sizeChange);
+			}
+			
+			
+			protected function txtRotate_changeHandler(event:TextOperationEvent):void
+			{
+				//_winOverlayEdit.rotateItem(_overlayDetail);
+			}
+			
+			protected function menuAlpha_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				closeMenus(popupAlpha);
+				popupAlpha.displayPopUp = !popupAlpha.displayPopUp;
+			}
+			
+			private function sendAlphaEvent():void
+			{
+				_winOverlayEdit.changeItemAlpha(_overlayDetail);
+			}
+			
+			protected function menuLock_clickHandler(event:MouseEvent):void
+			{
+				menuLock.selected = !menuLock.selected;
+				overlayDetail.lockedBool = menuLock.selected;
+				
+				unSelect();				
+				_winOverlayEdit.lockItem(_overlayDetail);
+			}
+
+			protected function menuAspect_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				menuAspect.selected = !menuAspect.selected;
+				overlayDetail.maintainAspectBool = menuAspect.selected;
+				
+				closeMenus();
+				unSelect();
+				_winOverlayEdit.lockItem(_overlayDetail);
+			}
+
+			
+			protected function menuDelete_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+
+				closeMenus();
+				unSelect();
+				_winOverlayEdit.deleteItem(_overlayDetail);				
+			}
+			
+			protected function menuLayers_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				closeMenus(popupLayers);
+				popupLayers.displayPopUp = !popupLayers.displayPopUp;
+			}
+
+			protected function menuBringToFront_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				closeMenus();
+				unSelect();
+				_winOverlayEdit.changeItemZOrder(_overlayDetail, true);		
+			}
+			
+			protected function menuSendToBack_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				closeMenus();
+				unSelect();
+				_winOverlayEdit.changeItemZOrder(_overlayDetail, false);		
+			}
+			
+			protected function menuEffects_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				closeMenus(popupEffects);
+				popupEffects.displayPopUp = !popupEffects.displayPopUp;						 
+			
+				if (popupEffects.displayPopUp) 
+				{
+					this.callLater(setEffectIndex);
+				}
+			}
+			
+			private function setEffectIndex():void
+			{
+				for (var i:int = 0; i < ddEffect.dataProvider.length; i++)
+				{
+					if (ddEffect.dataProvider[i].value == _overlayDetail.effectId)
+					{
+						ddEffect.selectedIndex = i;
+						break;
+					}
+				}
+			}
+			
+			protected function ddEffect_changeHandler(event:IndexChangeEvent):void
+			{
+				_overlayDetail.effectId =  ddEffect.selectedItem.value;
+				closeMenus(popupMain);
+			}
+			
+			protected function menuText_clickHandler(event:MouseEvent):void
+			{
+				popupText.displayPopUp = !popupText.displayPopUp ;
+				
+				closeMenus(popupText);
+				if (popupText.displayPopUp) 
+				{
+					this.callLater(setTextAttr);
+				}
+			}
+
+			private function setTextAttr():void
+			{
+				ddFont.selectedIndex = 0;
+				for (var i:int = 0; i < ddFont.dataProvider.length; i++)
+				{
+					if ( ddFont.dataProvider[i].value == _overlayDetail.fontFamily)
+					{
+						ddFont.selectedIndex = i;
+						break;
+					}
+				}
+				
+				ddSize.textInput.text = _overlayDetail.fontSize;
+			}
+			
+			protected function colorPick_changeHandler(event:ColorPickerEvent):void
+			{
+				_overlayDetail.colorNum = colorPick.selectedColor;
+				
+				_winOverlayEdit.changeItemTextSize(_overlayDetail);
+			}
+			
+			protected function ddSize_changeHandler(event:IndexChangeEvent):void
+			{
+				if (ddSize.selectedItem is String)
+				{
+					_overlayDetail.fontSizeNum = parseFloat(ddSize.selectedItem);	
+				}
+				else
+				{
+					_overlayDetail.fontSizeNum = parseFloat(ddSize.selectedItem.value);
+				}
+				
+				_winOverlayEdit.changeItemTextSize(_overlayDetail);
+			}
+			
+			protected function ddFont_changeHandler(event:IndexChangeEvent):void
+			{
+				_overlayDetail.fontFamily = ddFont.selectedItem.value;				
+			}
+			
+			
+			protected function menuFilters_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				closeMenus(popupFilters);
+				popupFilters.displayPopUp = !popupFilters.displayPopUp;	
+			}
+			
+			protected function menuFilterShadow_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+
+				closeSubMenus(popupFilterShadow);
+				
+				popupFilterShadow.displayPopUp = !popupFilterShadow.displayPopUp;	
+			}
+
+			protected function menuFilterGlow_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				closeSubMenus(popupFilterGlow);
+				
+				popupFilterGlow.displayPopUp = !popupFilterGlow.displayPopUp;
+			}
+
+			protected function sendFilterEvent():void
+			{
+				this.callLater(_winOverlayEdit.changeItemFilters, [_overlayDetail]);
+			}
+
+			protected function menuPlayTimes_clickHandler(event:MouseEvent):void
+			{
+				if (_overlayDetail.lockedBool) {return;}
+				
+				closeMenus(popupPlayTimes);
+				
+				popupPlayTimes.displayPopUp = !popupPlayTimes.displayPopUp;
+				
+				this.callLater(setDisplayTimesAttr);
+			}
+			
+			private function setDisplayTimesAttr():void
+			{
+				// Fill out the corect check boxes
+				if (_baseIsSWF)
+				{
+					var fromStart:Boolean = _overlayDetail.startTimeInt == 0 && _overlayDetail.startFrameInt == 0;
+					var toEnd:Boolean = _overlayDetail.endTimeInt == 0 && _overlayDetail.endFrameInt == 0;
+					
+					chkFromStart.selected = fromStart;
+					chkToEnd.selected = toEnd;
+					
+					// Default to time if both are selected
+					if (fromStart && toEnd)
+					{
+						radTime.selected = true;
+						radFrames.selected = false;
+					}
+					else
+					{
+						// Which one do we show Time or Frame
+						// Assume both cannot be non zero
+						radTime.selected = _overlayDetail.startTimeInt > 0 || _overlayDetail.endTimeInt > 0;
+						radFrames.selected = _overlayDetail.startFrameInt > 0 || _overlayDetail.endFrameInt > 0;
+					}
+				}
+				else
+				{
+					chkFromStart.selected = _overlayDetail.startTimeInt == 0;
+					chkToEnd.selected = _overlayDetail.endTimeInt == 0;
+				}
+				
+				durStart.duration = _overlayDetail.startTimeInt;
+				durEnd.duration = _overlayDetail.endTimeInt;
+				durationChangeHandler(null);
+			}
+			
+			protected function durStart_creationCompleteHandler(event:FlexEvent):void
+			{
+				durStart.lblMinute.text = "";
+				durStart.lblSecond.text = ":";
+				durStart.stepMinute.toolTip = "Minutes";
+				durStart.stepSecond.toolTip = "Seconds";
+				durStart.addEventListener(Duration.DURATION_CHANGE, durationChangeHandler, false, 0, true);
+				
+				// Start invisible to avoid a resize flicker
+				this.callLater(showDuration, [durStart]);
+			}
+			
+			protected function durEnd_creationCompleteHandler(event:FlexEvent):void
+			{
+				durEnd.lblMinute.text = "";
+				durEnd.lblSecond.text = ":";
+				durEnd.stepMinute.toolTip = "Minutes";
+				durEnd.stepSecond.toolTip = "Seconds";
+				durEnd.addEventListener(Duration.DURATION_CHANGE, durationChangeHandler, false, 0, true);
+
+				// Start invisible to avoid a resize flicker
+				this.callLater(showDuration, [durEnd]);
+			}
+			
+			private function showDuration(item:Duration):void
+			{
+				item.width = 150;
+			}
+			
+			private function durationChangeHandler(event:Event):void
+			{
+				_overlayDetail.startTime = durStart.duration.toString();
+				_overlayDetail.endTime = durEnd.duration.toString();
+				
+				// While we are here validate
+				durStart.errorString = checkStartEndTime();
+				durEnd.errorString = durStart.errorString;
+				
+				_overlayDetail.hasError = durStart.errorString != "";
+				
+				// Inform the parent if we have issues
+				_winOverlayEdit.setItemErrorString(_overlayDetail, durStart.errorString);
+				
+				sendFilterEvent();
+			}
+
+			private function checkStartEndTime():String
+			{
+				if (_overlayDetail.startTimeInt == 0) {return "";}
+				if (_overlayDetail.endTimeInt == 0) {return "";}
+				if (chkFromStart.selected) {return "";}
+				if (chkToEnd.selected) {return "";}
+				if (_overlayDetail.startTimeInt > _overlayDetail.endTimeInt) {return "Start time must be before the end time"}
+				
+				return "";	// All is well
+			}
+
+			private function checkStartEndFrame():String
+			{
+				if (_overlayDetail.startFrameInt == 0) {return "";}
+				if (_overlayDetail.endFrameInt == 0) {return "";}
+				if (chkFromStart.selected) {return "";}
+				if (chkToEnd.selected) {return "";}
+				if (_overlayDetail.startFrameInt > _overlayDetail.endFrameInt) {return "Start frame must be before the end frame"}
+				
+				return "";	// All is well
+			}
+			
+			protected function txtStartFrame_changeHandler(event:TextOperationEvent):void
+			{
+				txtStartFrame.errorString = checkStartEndFrame();
+				txtEndFrame.errorString = checkStartEndFrame();
+			}
+			
+			protected function txtEndFrame_changeHandler(event:TextOperationEvent):void
+			{
+				txtStartFrame.errorString = checkStartEndFrame();
+				txtEndFrame.errorString = checkStartEndFrame();
+			}
+						
+			
+			protected function chkFromStart_clickHandler(event:MouseEvent):void
+			{
+				if (chkFromStart.selected)
+				{
+					_overlayDetail.startTimeInt = 0;
+					_overlayDetail.startFrameInt = 0;
+				}
+			
+				durationChangeHandler(null);
+			}
+			
+			protected function chkToEnd_clickHandler(event:MouseEvent):void
+			{
+				if (chkToEnd.selected)
+				{
+					_overlayDetail.endTimeInt = 0;
+					_overlayDetail.endFrameInt = 0;
+				}
+				
+				durationChangeHandler(null);
+			}
+			
+		]]>
+	</fx:Script>
+	<s:states>
+		<s:State name="text"/>
+		<s:State name="media"/>
+		<s:State name="textSWFBase"/>
+		<s:State name="mediaSWFBase"/>
+	</s:states>
+	<s:BorderContainer id="btnSelect" width="24" height="25" backgroundColor="#00FF00"
+					   borderColor="#00B300" borderVisible="{!buttonOnly}" borderWeight="1"
+					   click="btnSelect_clickHandler(event)" cornerRadius="4"
+					   mouseOut="btnSelect_mouseOutHandler(event)"
+					   mouseOver="btnSelect_mouseOverHandler(event)" toolTip="Edit Attributes"
+					   backgroundAlpha="{buttonOnly ? 0 : 1.0}">
+		<s:Image id="imgGear" mouseEnabled="{buttonOnly}" source="@Embed('assets/icons/cog.png')"
+				 horizontalCenter="0" verticalCenter="0" mouseOut="imgGear_mouseOutHandler(event)" 
+				 mouseOver="imgGear_mouseOverHandler(event)" click="imgGear_clickHandler(event)" />
+	</s:BorderContainer>
+	
+	<s:PopUpAnchor id="popupMain" >
+		<s:BorderContainer  styleName="AttrMenu">
+			<s:layout>
+				<s:VerticalLayout gap="2" paddingBottom="5" paddingLeft="5" paddingRight="5" paddingTop="5"/>
+			</s:layout>
+
+			<components:MenuToggle id="menuLock" click="menuLock_clickHandler(event)"
+								   icon="@Embed('assets/icons/lock_open.png')"
+								   iconSelected="@Embed('assets/icons/lock.png')" text="Unlocked"
+								   textSelected="Locked"/>
+
+			<components:MenuLabel id="menuDelete" icon="@Embed('assets/icons/delete.png')"  text="Delete" 
+								  click="menuDelete_clickHandler(event)" enabled="{!_overlayDetail.lockedBool}"/>	
+
+			<components:MenuToggle id="menuAspect" icon="@Embed('assets/icons/noAspectRatio.png')"
+								   iconSelected="@Embed('assets/icons/aspectRatio.png')"
+								   text="No Aspect" textSelected="Keep Aspect"
+								   click="menuAspect_clickHandler(event)" enabled="{!_overlayDetail.lockedBool}"/>
+
+			<s:HGroup visible.media="false" visible.mediaSWFBase="false" height.media="0"  height.mediaSWFBase="0">
+				<components:MenuLabel id="menuText" enabled="{!_overlayDetail.lockedBool}"
+									  icon="@Embed('assets/icons/text_smallcaps.png')" showMore="true"
+									  text="Edit Text" click="menuText_clickHandler(event)"/>
+				<s:PopUpAnchor id="popupText"  >
+					<s:BorderContainer styleName="AttrMenu"  dropShadowVisible="true" width="250" >
+						<s:layout>
+							<s:VerticalLayout paddingBottom="5" paddingLeft="5" paddingRight="5"
+											  paddingTop="5"/>
+						</s:layout>
+						<s:TextArea width="100%" text="@{_overlayDetail.text}" />
+						<s:HGroup width="100%">
+							<s:DropDownList id="ddFont" width="150" change="ddFont_changeHandler(event)" >
+								<s:dataProvider>
+									<s:ArrayCollection>
+										<fx:Object label="Arial" value="arialEmbed" />
+										<fx:Object label="Courier" value="courierEmbed" />
+										<fx:Object label="Times" value="timesRomanEmbed" />
+										<fx:Object label="Verdana" value="verdanaEmbed" />
+									</s:ArrayCollection>
+								</s:dataProvider>
+							</s:DropDownList>
+							<s:ComboBox maxChars="3" restrict="0-9" id="ddSize" width="100%" change="ddSize_changeHandler(event)">
+								<s:dataProvider>
+									<s:ArrayCollection>
+										<fx:Object label="16" value="16" />
+										<fx:Object label="20" value="20" />
+										<fx:Object label="24" value="24" />
+										<fx:Object label="28" value="28" />
+										<fx:Object label="36" value="36" />
+										<fx:Object label="48" value="48" />
+										<fx:Object label="72" value="72" />
+										<fx:Object label="96" value="96" />
+										<fx:Object label="120" value="120" />
+										<fx:Object label="144" value="144" />
+									</s:ArrayCollection>
+								</s:dataProvider>
+							</s:ComboBox>			
+						</s:HGroup>
+						
+						<s:HGroup>
+							<s:ToggleButton id="toggleBold" icon="@Embed('assets/icons/text_bold.png')" 
+											width="24" selected="@{_overlayDetail.isBold}" />
+							<s:ToggleButton id="toggleItalic" icon="@Embed('assets/icons/text_italic.png')" 
+											width="24" selected="@{_overlayDetail.isItalic}" />
+							<s:ToggleButton id="toggleUnderline"  icon="@Embed('assets/icons/text_underline.png')" 
+											width="24" selected="@{_overlayDetail.isUnderline}" />
+							<s:Spacer />
+							<mx:ColorPicker id="colorPick" change="colorPick_changeHandler(event)" creationComplete="{colorPick.selectedColor = _overlayDetail.colorNum}"/>
+						</s:HGroup>
+						
+					</s:BorderContainer>
+				</s:PopUpAnchor>
+			</s:HGroup>
+
+			<s:HGroup>
+				<components:MenuLabel id="menuTransform" icon="@Embed('assets/icons/shape_handles.png')"  text="Transform" showMore="true" 
+									  click="menuTransform_clickHandler(event)" enabled="{!_overlayDetail.lockedBool}"/>
+				<s:PopUpAnchor id="popupTransform"    >
+					<s:BorderContainer styleName="AttrMenu" dropShadowVisible="true" >
+						<s:layout>
+							<s:VerticalLayout paddingBottom="5" paddingLeft="5" paddingRight="5"
+											  paddingTop="5" gap="4"/>
+						</s:layout>
+						<s:HGroup verticalAlign="middle">
+							<s:Image source="@Embed('/assets/icons/xY.png')" width="16" height="16" toolTip="X and Y Positions" />
+							<s:Spacer />
+							<s:TextInput id="txtX" width="40" enter="transform_changeHandler(event)" toolTip="X position"
+										 focusOut="transform_changeHandler(event)" restrict="0-9./-" text="@{_overlayDetail.x}" />
+							<s:Label width="10" fontWeight="bold" text="," textAlign="center"/>
+							<s:TextInput id="txtY" width="40" restrict="0-9./-" text="@{_overlayDetail.y}" toolTip="Y position"
+										 focusOut="transform_changeHandler(event)" enter="transform_changeHandler(event)" />
+						</s:HGroup>						
+						<s:Spacer />
+						<s:HGroup  verticalAlign="middle">
+							<s:Image source="@Embed('/assets/icons/widthHeight.png')" width="16" height="16" toolTip="Width and Height" />
+							<s:Spacer />
+							<s:TextInput id="txtWidth" width="40" restrict="0-9./-" text="@{_overlayDetail.width}" toolTip="Width" 
+										 focusOut="transform_changeHandler(event)" enter="transform_changeHandler(event)"/>
+							<s:Label width="10" fontWeight="bold" text="x" textAlign="center"/>
+							<s:TextInput id="txtHeight" width="40" restrict="0-9./-" text="@{_overlayDetail.height}" toolTip="Height" 
+										 focusOut="transform_changeHandler(event)" enter="transform_changeHandler(event)"/>
+						</s:HGroup>
+						<!--
+						<s:Spacer />
+						<s:HGroup  verticalAlign="middle">
+							<s:Label text="Rotate" width="40"  />
+							<s:TextInput id="txtRotate" width="50" restrict="0-9./-" text="@{_overlayDetail.rotate}" change="txtRotate_changeHandler(event)"/>
+						</s:HGroup>
+						-->
+					</s:BorderContainer>
+				</s:PopUpAnchor>
+				
+			</s:HGroup>
+			
+			<s:HGroup>
+				<components:MenuLabel id="menuAlpha" icon="@Embed('assets/icons/transparency.png')" text="Transparency" 
+									  click="menuAlpha_clickHandler(event)" showMore="true" enabled="{!_overlayDetail.lockedBool}"/>
+				<s:PopUpAnchor id="popupAlpha"  >
+					<s:BorderContainer styleName="AttrMenu"  dropShadowVisible="true" >
+						<s:layout>
+							<s:HorizontalLayout verticalAlign="middle" paddingBottom="5" paddingLeft="5" paddingRight="5" paddingTop="5"/>
+						</s:layout>
+						<s:NumericStepper id="stepAlpha" maximum="1" minimum="0" stepSize=".1"
+										  width="45" value="@{overlayDetail.alphaNum}"  change="{sendAlphaEvent()}" />
+						<s:HSlider id="slideAlpha" minimum="0.0" maximum="1.0" stepSize="0.1"  
+								   value="@{overlayDetail.alphaNum}" width="75" change="{sendAlphaEvent()}"/>
+					</s:BorderContainer>
+				</s:PopUpAnchor>
+			</s:HGroup>
+			
+			<s:HGroup>
+				<components:MenuLabel id="menuLayers" enabled="{!_overlayDetail.lockedBool}"
+									  icon="@Embed('assets/icons/layers.png')" showMore="true"
+									  text="Arrange"  click="menuLayers_clickHandler(event)"/>
+				<s:PopUpAnchor id="popupLayers"  >
+					<s:BorderContainer styleName="AttrMenu"  dropShadowVisible="true" >
+						<s:layout>
+							<s:VerticalLayout paddingBottom="5" paddingLeft="5" paddingRight="5"
+											  paddingTop="5"/>
+						</s:layout>
+						<components:MenuLabel id="menuBringToFront"
+											  enabled="{!_overlayDetail.lockedBool}"
+											  icon="@Embed('assets/icons/shape_move_front.png')"
+											  text="Bring to Front"
+											  click="menuBringToFront_clickHandler(event)"/>	
+						<components:MenuLabel id="menuSendToBack"
+											  enabled="{!_overlayDetail.lockedBool}"
+											  icon="@Embed('assets/icons/shape_move_back.png')"
+											  text="Send to Back"
+											  click="menuSendToBack_clickHandler(event)"/>	
+					</s:BorderContainer>
+				</s:PopUpAnchor>
+			</s:HGroup>
+			
+			<s:HGroup>
+				<components:MenuLabel id="menuEffects" icon="@Embed('assets/icons/shape_square_go.png')" text="Transition" 
+									  click="menuEffects_clickHandler(event)" showMore="true" enabled="{!_overlayDetail.lockedBool}"/>
+				<s:PopUpAnchor id="popupEffects"  >
+					<s:BorderContainer styleName="AttrMenu"  dropShadowVisible="true" >
+						<s:layout>
+							<s:HorizontalLayout paddingBottom="5" paddingLeft="5" paddingRight="5"
+												paddingTop="5"/>
+						</s:layout>
+						<s:DropDownList id="ddEffect" dataProvider="{EffectsManager.effectsList}" change="ddEffect_changeHandler(event)" verticalCenter="0" />
+					</s:BorderContainer>
+				</s:PopUpAnchor>
+			</s:HGroup>
+			
+			<s:HGroup>
+				<components:MenuLabel id="menuFilters" enabled="{!_overlayDetail.lockedBool}"
+									  icon="@Embed('assets/icons/wand.png')" showMore="true"
+									  text="Filters"
+									  click="menuFilters_clickHandler(event)"/>
+				<s:PopUpAnchor id="popupFilters"  >
+					<s:BorderContainer styleName="AttrMenu"  dropShadowVisible="true" >
+						<s:layout>
+							<s:VerticalLayout paddingBottom="5" paddingLeft="5" paddingRight="5"
+											  paddingTop="5"/>
+						</s:layout>
+						<s:HGroup>
+							<components:MenuLabel id="menuFilterShadow"
+												  enabled="{!_overlayDetail.lockedBool}"
+												  icon="@Embed('assets/icons/dropShadow.png')"
+												  showMore="true" text="Drop Shadow"
+												  click="menuFilterShadow_clickHandler(event)"/>
+							<s:PopUpAnchor id="popupFilterShadow"  >
+								<s:BorderContainer styleName="AttrMenu"  dropShadowVisible="true" >
+									<s:layout>
+										<s:VerticalLayout paddingBottom="5" paddingLeft="5" paddingRight="5"
+														  paddingTop="5"/>
+									</s:layout>
+									<s:CheckBox id="chkShowDrop" label="Show Drop Shadow"  selected="@{_overlayDetail.showDropShadowBool}" change="sendFilterEvent()" />
+									<s:Spacer />
+									<s:VGroup enabled="@{chkShowDrop.selected}">
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Distance"/>
+											<s:HSlider maximum="100" minimum="0" stepSize="1" 
+													   value="@{_overlayDetail.dropShadowFilter.distance}" change="sendFilterEvent()"/>
+										</s:HGroup>
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Angle" />
+											<s:HSlider maximum="360" minimum="0" stepSize="1"
+													   value="@{_overlayDetail.dropShadowFilter.angle}" change="sendFilterEvent()"/>
+										</s:HGroup>
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Color" />
+											<mx:ColorPicker selectedColor="@{_overlayDetail.dropShadowFilter.color}" change="sendFilterEvent()" />
+										</s:HGroup>
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Alpha" />
+											<s:HSlider maximum="1" minimum="0" stepSize=".1"
+													   value="@{_overlayDetail.dropShadowFilter.alpha}" change="sendFilterEvent()"/>
+										</s:HGroup>
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Blur" />
+											<s:HSlider maximum="100" minimum="0" stepSize="1"
+													   value="@{_overlayDetail.dropShadowFilter.blur}" change="sendFilterEvent()"/>
+										</s:HGroup>
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Strength" />
+											<s:HSlider maximum="10" minimum="0" stepSize="1"
+													   value="@{_overlayDetail.dropShadowFilter.strength}" change="sendFilterEvent()"/>
+										</s:HGroup>
+									</s:VGroup>
+								</s:BorderContainer>	
+							</s:PopUpAnchor>
+						</s:HGroup>
+						
+						<s:HGroup>
+							<components:MenuLabel id="menuFilterGlow"
+												  enabled="{!_overlayDetail.lockedBool}"
+												  icon="@Embed('assets/icons/glow.png')"
+												  showMore="true" text="Glow" click="menuFilterGlow_clickHandler(event)"/>
+							<s:PopUpAnchor id="popupFilterGlow"  >
+								<s:BorderContainer styleName="AttrMenu"  dropShadowVisible="true" >
+									<s:layout>
+										<s:VerticalLayout paddingBottom="5" paddingLeft="5" paddingRight="5"
+														  paddingTop="5"/>
+									</s:layout>
+									<s:CheckBox id="chkShowGlow" label="Show Glow"  selected="@{_overlayDetail.showGlowBool}" change="sendFilterEvent()" />
+									<s:Spacer />
+									<s:VGroup enabled="@{chkShowGlow.selected}">
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Color" />
+											<mx:ColorPicker selectedColor="@{_overlayDetail.glowFilter.color}" change="sendFilterEvent()" />
+										</s:HGroup>
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Alpha" />
+											<s:HSlider maximum="1" minimum="0" stepSize=".1"
+													   value="@{_overlayDetail.glowFilter.alpha}" change="sendFilterEvent()"/>
+										</s:HGroup>
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Blur" />
+											<s:HSlider maximum="100" minimum="0" stepSize="1"
+													   value="@{_overlayDetail.glowFilter.blur}" change="sendFilterEvent()"/>
+										</s:HGroup>
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Strength" />
+											<s:HSlider maximum="10" minimum="0" stepSize="1"
+													   value="@{_overlayDetail.glowFilter.strength}" change="sendFilterEvent()"/>
+										</s:HGroup>
+										<s:HGroup verticalAlign="middle">
+											<s:Label width="60" text="Inner" />
+											<s:CheckBox selected="@{_overlayDetail.glowFilter.inner}" click="sendFilterEvent()"/>
+										</s:HGroup>
+									</s:VGroup>
+								</s:BorderContainer>	
+							</s:PopUpAnchor>
+						</s:HGroup>
+						
+					</s:BorderContainer>
+				</s:PopUpAnchor>
+			</s:HGroup>
+			
+			<s:HGroup>
+				<components:MenuLabel id="menuPlayTimes" enabled="{!_overlayDetail.lockedBool}"
+									  icon="@Embed('assets/icons/clock_play.png')" showMore="true"
+									  text="Display Times" click="menuPlayTimes_clickHandler(event)"/>
+				<s:PopUpAnchor id="popupPlayTimes"  >
+					<s:BorderContainer styleName="AttrMenu"  dropShadowVisible="true" >
+						<s:layout>
+							<s:VerticalLayout paddingBottom="5" paddingLeft="5" paddingRight="5" paddingTop="5" gap="2"/>
+						</s:layout>
+						
+						<s:HGroup width="100%" id="groupTimeFrame" includeIn="mediaSWFBase, textSWFBase" >
+							<s:RadioButton label="Time" groupName="TimesFrames" id="radTime" />
+							<s:RadioButton label="Frames" groupName="TimesFrames" id="radFrames"  />					
+						</s:HGroup>
+						<s:Spacer includeIn="mediaSWFBase, textSWFBase" />
+						
+						<s:CheckBox label="Play from start" id="chkFromStart" click="chkFromStart_clickHandler(event)" />
+						<mx:ViewStack id="vsStartTime" height="{chkFromStart.selected ? 0 : 25}" width="170" 
+									  visible="{!chkFromStart.selected}" creationPolicy="all" 
+									  selectedIndex.text="0" selectedIndex.media="0"
+									  selectedIndex.mediaSWFBase="{radTime.selected ? 0 : 1}"
+									  selectedIndex.textSWFBase="{radTime.selected ? 0 : 1}"> 
+							<s:NavigatorContent label="Time" width="100%" height="100%" >
+								<s:layout>
+									<s:HorizontalLayout verticalAlign="middle"/>
+								</s:layout>
+									<s:Label text="Start" width="25" />
+									<components:Duration id="durStart" width="0" creationComplete="durStart_creationCompleteHandler(event)" />
+							</s:NavigatorContent>
+							<s:NavigatorContent label="Frames" width="100%" height="100%">
+								<s:layout>
+									<s:HorizontalLayout verticalAlign="middle"/>
+								</s:layout>
+								<s:Label text="Start" width="25" />
+								<s:TextInput id="txtStartFrame" width="50" maxChars="5" restrict="0-9"  text="@{_overlayDetail.startFrame}" change="txtStartFrame_changeHandler(event)" />
+							</s:NavigatorContent>
+						</mx:ViewStack>
+						
+						<s:CheckBox label="Play  to end" id="chkToEnd" click="chkToEnd_clickHandler(event)"  />
+						<mx:ViewStack id="vsEndTime" height="{chkToEnd.selected ? 0 : 25}" width="170" 
+									  visible="{!chkToEnd.selected}" creationPolicy="all"
+									  selectedIndex.text="0" selectedIndex.media="0"
+									  selectedIndex.mediaSWFBase="{radTime.selected ? 0 : 1}"
+									  selectedIndex.textSWFBase="{radTime.selected ? 0 : 1}"> 
+							<s:NavigatorContent label="Time" width="100%" height="100%" >
+								<s:layout>
+									<s:HorizontalLayout verticalAlign="middle"/>
+								</s:layout>
+								<s:Label text="End" width="25" />
+								<components:Duration id="durEnd"  width="0"  creationComplete="durEnd_creationCompleteHandler(event)" />
+							</s:NavigatorContent>
+							<s:NavigatorContent label="Frames" width="100%" height="100%">
+								<s:layout>
+									<s:HorizontalLayout verticalAlign="middle"/>
+								</s:layout>
+								<s:Label  text="End" width="25" />
+								<s:TextInput id="txtEndFrame" width="50" maxChars="5" restrict="0-9"
+											 text="@{_overlayDetail.endFrame}"
+											 change="txtEndFrame_changeHandler(event)"/>
+							</s:NavigatorContent>
+						</mx:ViewStack>
+						
+					</s:BorderContainer>
+				</s:PopUpAnchor>
+			</s:HGroup>
+
+			
+		</s:BorderContainer>
+	</s:PopUpAnchor>
+</s:VGroup>

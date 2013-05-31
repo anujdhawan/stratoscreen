@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+			   xmlns:s="library://ns.adobe.com/flex/spark"
+			   xmlns:mx="library://ns.adobe.com/flex/mx"
+			   close="this_closeHandler(event)"
+			   creationComplete="this_creationCompleteHandler(event)" title="Add Private Provider">
+	<s:layout>
+		<s:VerticalLayout horizontalAlign="center" paddingBottom="10" paddingLeft="10"
+						  paddingRight="10" paddingTop="10"/>
+	</s:layout>
+	<fx:Declarations>
+		<mx:StringValidator id="validCode1" source="{txtCode}" property="text" maxLength="5" minLength="5" />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.utils.SecurityUtils;
+			import com.stratoscreen.utils.SharedUtils;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.PopUpManager;
+			
+			[Bindable] private var _code:String;
+			private var _success:Boolean = false;
+			private var _regionId:int = 1; 
+			
+			public function get success():Boolean
+			{
+				return _success;
+			}
+			
+			public function get code():String
+			{
+				if (!_success) {return "";}
+				
+				return _code;
+			}
+			
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+			}
+
+			protected function this_closeHandler(event:CloseEvent):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+
+			protected function btnOK_clickHandler(event:MouseEvent):void
+			{
+				var message:String = "";
+				var result:ValidationResultEvent = validCode1.validate();
+				if (result.results != null)  {message = result.message;}
+			
+				_regionId =  txtCode.text.toUpperCase().charCodeAt(0) - 64;	// 65 = 'A'
+				if (_regionId < 1 || _regionId >= AWSRegions.endpoints.length) 
+				{
+					message = "Invalid Code";
+				}
+				
+				txtCode.errorString = message;
+				
+				if (message != "") {return;}
+
+				var endpoint:AWSEndpoint = AWSRegions.getAWSEndpoint(_regionId);
+				
+				var url:String = "https://" + endpoint.s3 + "/" + txtCode.text.toLowerCase()  + "/" + txtCode.text.toLowerCase();
+				var loader:URLLoader = new URLLoader();
+				loader.addEventListener(Event.COMPLETE, pkgHandler);
+				loader.addEventListener(SecurityErrorEvent.SECURITY_ERROR, pkgErrorHandler);
+				loader.addEventListener(IOErrorEvent.IO_ERROR, pkgErrorHandler);
+				loader.load(new URLRequest(url));
+
+				this.enabled = false
+			}
+			
+			private function pkgHandler(event:Event):void
+			{
+				this.enabled = true;
+				try
+				{
+					var DELIMETER:String = "\t";
+					
+					// Set the security utility so it can properly decrypt data
+					// Since all accounts use the main web bucket temporarily use
+					// the web bucket for both
+					SecurityUtils.accountCode = txtCode.text.toLowerCase();
+					SecurityUtils.installCode = txtCode.text.toLowerCase();
+					
+					var pkg:String = event.target.data;
+					pkg = SecurityUtils.simpleDecrypt(pkg, SecurityUtils.ACCOUNT_KEY);
+					
+					// Split up the 
+					var sections:Array = pkg.split(DELIMETER);
+					
+					var regionId:int = parseInt(sections[0]);
+					if (regionId == 0) {throw new Error("Invalid region id in sign on package");}
+					
+					var accessKey:String = SecurityUtils.simpleDecrypt(sections[1]);
+					if (accessKey == null || accessKey == "") {throw new Error("Invalid access key in sign on package");}
+					
+					var secretKey:String =SecurityUtils.simpleDecrypt(sections[2]);
+					if (secretKey == null || secretKey == "") {throw new Error("Invalid secret key in sign on package");}					
+
+					// The package is OK
+					_success = true;
+					SharedUtils.setValue(Constants.PRIVATE_CODE, txtCode.text.toLowerCase());
+					
+					this_closeHandler(null);
+					
+				}
+				catch (err:Error)
+				{
+					Alert.show("Could not load signon package", "Error");		
+				}
+			}
+
+			private function pkgErrorHandler(event:Event):void
+			{
+				this.enabled = true;
+				Alert.show("Invalid Web Code", "Invalid Code");
+			}
+		]]>
+	</fx:Script>
+	<s:Label width="300">
+		<s:text>Enter the private code supplied by the provider administrator. </s:text>
+	</s:Label>
+	<s:Spacer />
+	<s:TextInput id="txtCode" maxChars="5" restrict="a-zA-Z0-9" text="@{_code}" typographicCase="uppercase"/>
+	<s:Spacer />
+	<s:Button id="btnOK" label="OK" click="btnOK_clickHandler(event)"/>
+	<s:controlBarContent/>
+</s:TitleWindow>

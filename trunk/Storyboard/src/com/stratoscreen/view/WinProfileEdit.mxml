@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="352" height="204" title="Change User Profile"
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)">
+	<fx:Declarations>
+		<mx:EmailValidator id="validEmail" source="{txtUserEmail}" property="text" />		
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Users;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.PopUpManager;
+			
+			private var _appManager:AppManager;
+			[Bindable] private var _user:Users;
+			[Bindable] private var _isDirty:Boolean = false;
+			private var _canceled:Boolean = true;	
+
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				_appManager = this.parentApplication.appManager;
+				_user = Utils.copyClassObject(Users, _appManager.currentUser);				 
+			}			
+
+			protected function closeHandler(event:CloseEvent):void
+			{				
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+			
+			public function get canceled():Boolean
+			{
+				return _canceled;
+			}
+			
+			public function get user():Users
+			{
+				return _user;
+			}
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				var result:ValidationResultEvent = validEmail.validate();
+				if (result.results != null)  
+				{
+					lblStatus.text = "Invalid Email";
+					return;
+				}
+
+				this.enabled = false;
+				lblStatus.text = "Updating user";
+				_canceled = false;				
+				_user.updated = true;
+				_appManager.sdb.updateDomain([_user], updateHandler);
+			}
+			
+			private function updateHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				if (!event.success)
+				{
+					lblStatus.text = event.message;
+					Alert.show("Could not update user profile", "Update Profile");
+					return;
+				}
+				
+				closeHandler(null);
+			}
+
+
+		]]>
+	</fx:Script>
+	<s:controlBarContent>
+		<s:Label id="lblStatus" text=" "/>	
+	</s:controlBarContent>
+	
+	<s:Label x="10" y="10" text="Email" height="20" fontWeight="bold"/>
+	<s:TextInput y="10" id="txtUserEmail" text="@{_user.email}" left="85" right="10" change="{_isDirty = true;}"/>
+	<s:Label x="10" y="38" text="First Name" height="20" fontWeight="bold"/>
+	<s:TextInput y="38" text="@{_user.firstName}"  left="85" right="10" change="{_isDirty = true;}"/>
+	<s:Label x="10" y="66" text="Last Name" height="20" fontWeight="bold"/>
+	<s:TextInput y="66" text="@{_user.lastName}"  left="85" right="10" change="{_isDirty = true;}"/>
+	<s:Button label="Update" id="btnSave" click="btnSave_clickHandler(event)" horizontalCenter="129" bottom="10" enabled="{_isDirty}"/>
+</s:TitleWindow>

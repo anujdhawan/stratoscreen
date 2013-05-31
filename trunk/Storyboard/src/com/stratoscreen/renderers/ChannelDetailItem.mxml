@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx"  xmlns:components="com.stratoscreen.components.*" 
+				autoDrawBackground="true" width="128" height="96" creationComplete="creationCompleteHandler(event)"
+				doubleClickEnabled="true" doubleClick="this_doubleClickHandler(event)" >	
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.controller.OverlayEditControl;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.ImageCacheManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.ChannelDetail;
+			import com.stratoscreen.model.domains.MediaGroups;
+			import com.stratoscreen.model.domains.Medias;
+			import com.stratoscreen.model.domains.Overlays;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.utils.LogUtils;
+			import com.stratoscreen.view.WinChannelEdit;
+			import com.stratoscreen.view.WinMediaEdit;
+			import com.stratoscreen.view.WinMediaGroupEdit;
+			
+			import mx.core.IFlexDisplayObject;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			public static var bucket:String;
+			public static var S3Endpoint:String;
+			
+			private static const GROUP_THUMB_RECT:Rectangle = new Rectangle(0, 0, 128, 86);
+			private static const GROUP_THUMB_GROUP_RECT:Rectangle = new Rectangle(0, 9, 128, 71);
+			
+			[Bindable][Embed(source="/assets/icons/delete.png")]
+			private var iconClear:Class;
+
+			[Bindable][Embed(source="/assets/images/paperClip.png")]
+			private static var imageClip:Class;			
+
+			private static var _appManager:AppManager;
+
+			[Bindable] private var _detail:ChannelDetail; 
+			private var _imageUtils:ImageUtils;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{		
+				rectDrag.visible = false;	// This only exist so the drag will show someting
+			}
+			
+			public override function get data():Object
+			{
+				return _detail;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				if (value == null) {return;}
+				if (swfLoading == null) {return;} 	// Still rendering
+				if (this.parent == null) {return;}	// Still rendering
+				if (_detail == value) {return;} 		// the item renderer has not changed
+				if (!(value is ChannelDetail)) {return;}	// The parent wil convert the data. Just wait
+				
+				if (_appManager == null) 
+				{
+					_appManager = this.parentApplication.appManager;
+					_imageUtils = new ImageUtils(_appManager.currentAccount.defaultScreenView);
+				}	
+				_detail = value as ChannelDetail;				
+
+				swfLoading.visible = true;
+				imgThumb.visible = false;
+				imgOverlayImage.visible = false;
+				imgOverlay.visible = false;
+				imgClip.visible = false;
+				rect1.visible = false;
+				rect2.visible = false;
+				rect3.visible = false;
+				
+				var thumbUrl:String = "https://" + S3Endpoint + "/" + bucket;
+				thumbUrl += "/" + Constants.THUMB_PREFIX + _detail.firstMediaId + Constants.THUMB_EXTENSION; 				
+				imgThumb.source = ImageCacheManager.getInstance().getImageByURL(thumbUrl);
+				imgThumb.load();
+				swfLoading.visible = true;				
+			}
+			
+			protected function imgThumb_completeHandler(event:Event):void
+			{
+				swfLoading.visible = false;
+				if (event is IOErrorEvent) {return;}
+				
+				// If this is a group we need to add the image into the stack
+				var bounds:Rectangle = GROUP_THUMB_RECT;
+				var rect:ResizeRectangle
+				
+				if (_imageUtils == null) {_imageUtils = new ImageUtils();}				
+				if (_detail.type == ChannelDetail.TYPE_GROUP || _detail.type == ChannelDetail.TYPE_GROUP_OVERLAY) 
+				{
+					bounds = GROUP_THUMB_GROUP_RECT;
+					rect = _imageUtils.getBestFit(event.target.content.width, event.target.content.height, 
+						                         bounds.width - 6, bounds.height -6);					
+				}
+				else
+				{
+					bounds = GROUP_THUMB_RECT;
+					rect = _imageUtils.getBestFit(event.target.content.width, event.target.content.height, 
+						                         bounds.width, bounds.height);
+				}
+				
+				groupThumb.x = bounds.x;
+				groupThumb.y = bounds.y;
+				groupThumb.width = bounds.width;
+				groupThumb.height = bounds.height;
+				
+				imgThumb.x = rect.x;
+				imgThumb.y = rect.y;
+				imgThumb.width = rect.width;
+				imgThumb.height = rect.height;
+				imgThumb.visible = true;
+				
+				// Set the other items based on the type
+				if (_detail.type == ChannelDetail.TYPE_GROUP || _detail.type == ChannelDetail.TYPE_GROUP_OVERLAY)
+				{
+					rect1.x = rect.x + 4;
+					rect1.y = rect.y + 4;
+					rect1.width = rect.width;
+					rect1.height = rect.height;
+					rect1.visible = true;
+					
+					rect2.x = rect.x + 2;
+					rect2.y = rect.y + 2;
+					rect2.width = rect.width;
+					rect2.height = rect.height;				
+					rect2.visible = true;
+					
+					rect3.x = rect.x;
+					rect3.y = rect.y;
+					rect3.width = rect.width;
+					rect3.height = rect.height;				
+					rect3.visible = true;
+					
+					imgClip.x = rect.x + 7;
+					imgClip.y = groupThumb.y + rect.y - 10;
+					imgClip.visible = true;
+				}
+
+				if (_detail.type == ChannelDetail.TYPE_OVERLAY || _detail.type == ChannelDetail.TYPE_GROUP_OVERLAY)
+				{
+					imgOverlayImage.visible = true;
+					imgOverlayImage.x = rect.x + 6;
+					imgOverlayImage.y = rect.y + 6;			
+					imgOverlayImage.visible = true;
+					
+					imgOverlay.visible = true;
+					imgOverlay.x = rect.x + rect.width - imgOverlay.width - 4;
+					imgOverlay.y = rect.y  + rect.height - imgOverlay.height - 4;													
+				}
+			}
+			
+			
+			protected function itemClickHandler(event:MouseEvent):void
+			{
+				Object(_appManager.currentEditWindow).selectItem(this.data);
+				event.stopImmediatePropagation();
+			}
+			
+			protected function itemDeleteHandler(event:MouseEvent):void
+			{
+				Object(_appManager.currentEditWindow).deleteItem(this.data);
+				event.stopImmediatePropagation();
+			}			
+			
+			protected function this_doubleClickHandler(event:MouseEvent):void
+			{
+				// Open a window to edit the selected item
+				// We will have to recreate a partial media object to make sure the edit window
+				// opens correctly
+				var window:IFlexDisplayObject;
+				var overlayControl:OverlayEditControl;
+				
+				switch (_detail.type)
+				{
+					case ChannelDetail.TYPE_GROUP:
+						var mediaGroup:MediaGroups = new MediaGroups();
+						mediaGroup.itemName = _detail.mediaId;
+						mediaGroup.name = _detail.name;
+						mediaGroup.playAll = _detail.playAll;
+						mediaGroup.type = _detail.groupType;
+						mediaGroup.playAll = _detail.playAll;
+						mediaGroup.playCount = _detail.playCount;
+						mediaGroup.playOrder = _detail.playOrder;
+						
+						var groupEdit:WinMediaGroupEdit = new WinMediaGroupEdit();
+						groupEdit.mediaGroup = mediaGroup;
+						window = groupEdit;						
+	
+						break;
+						
+					case ChannelDetail.TYPE_GROUP_OVERLAY:
+						var overlay:Overlays = new Overlays();
+						overlay.itemName = _detail.mediaId;
+						overlay.type = Overlays.TYPE_MEDIA_GROUP;
+						overlay.groupType = _detail.groupType;
+						overlay.playAll = _detail.playAll;
+						overlay.playCount = _detail.playCount;
+						overlay.playOrder = _detail.playOrder;
+						overlay.name = _detail.name;
+						overlay.baseMediaId = _detail.firstMediaId;
+						overlay.baseMediaGroupId = _detail.mediaGroupId;
+						overlay.duration = _detail.duration;
+						overlay.frames = _detail.frames;
+						overlay.width = _detail.width;
+						overlay.height = _detail.height;
+						
+						overlayControl = new OverlayEditControl(this.parentApplication as DisplayObject);
+						overlayControl.editOverlay(overlay);
+						break;
+					
+					case ChannelDetail.TYPE_MEDIA:
+						var media:Medias = new Medias();
+						media.name = _detail.name;
+						media.itemName = _detail.mediaId;
+						media.mimeType = _detail.mimeType;
+						media.width = _detail.width;
+						media.height = _detail.height;
+						media.accelerated = _detail.accelerated;
+						media.canStream = _detail.canStream;
+						media.duration = _detail.duration;
+						media.frames = _detail.frames;
+						
+						var mediaEdit:WinMediaEdit = new WinMediaEdit();
+						mediaEdit.media = media;
+						window = mediaEdit;						
+						break;
+		
+					case ChannelDetail.TYPE_OVERLAY:
+						overlay = new Overlays();
+						overlay.name = _detail.name;
+						overlay.itemName = _detail.mediaId;
+						overlay.type = Overlays.TYPE_MEDIA;
+						overlay.baseMediaId = _detail.firstMediaId;
+
+						overlayControl = new OverlayEditControl(this.parentApplication as DisplayObject);
+						overlayControl.editOverlay(overlay);
+						break;
+				}
+
+				if (window == null) {return;}
+				
+				if (!(window is WinMediaEdit))
+				{
+					window.width = this.parentApplication.width * Constants.EDIT_WINDOW_SIZE_SUB;
+					window.height = this.parentApplication.height * Constants.EDIT_WINDOW_SIZE_SUB;
+				}
+				window.addEventListener(CloseEvent.CLOSE, subWindowCloseHandler);
+				PopUpManager.addPopUp(window, this.parentApplication as DisplayObject, true);
+				
+				// The app only expects one edit window open at a time. 
+				// ... this kinda changes things
+				// ... I am ready for version 2.0 already
+				this.parentApplication.appManager.currentEditWindow = window; 
+			}
+						
+			private function subWindowCloseHandler(event:CloseEvent):void
+			{
+				// Reset the current edit window to WinChannelEdit
+				this.parentApplication.appManager.currentEditWindow = this.parentDocument.parentDocument;
+			}
+			
+		]]>
+	</fx:Script>
+	
+	<!-- Add the rectangle just to show up when dragging -->
+	<s:Rect id="rectDrag" width="100%" height="100%">
+		<s:stroke>
+			<s:SolidColorStroke color="0x00CC00" weight="2"/>
+		</s:stroke>			
+		<s:fill>
+			<s:LinearGradient rotation="45">
+				<s:entries>
+					<s:GradientEntry color="0xF0F0F0" ratio=".50"/>
+				</s:entries>					
+			</s:LinearGradient>			
+		</s:fill>
+	</s:Rect>
+	
+	<mx:SWFLoader id="swfLoading" horizontalCenter="2" verticalCenter="-4" width="50%" height="50%" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>
+	
+	<s:Group id="groupThumb" x="0" y="0" width="128" height="86" click="itemClickHandler(event)">
+		<s:Rect id="rect1" width="20" height="20" x="2" y="2" visible="false">
+			<s:stroke>
+				<s:SolidColorStroke color="0x404040" weight="1"/>
+			</s:stroke>			
+			<s:fill>
+				<s:LinearGradient rotation="45">
+					<s:entries>
+						<s:GradientEntry color="0xF0F0F0" ratio=".50"/>
+					</s:entries>					
+				</s:LinearGradient>			
+			</s:fill>
+		</s:Rect>
+		<s:Rect id="rect2" width="20" height="20" x="4" y="4" visible="false">
+			<s:stroke>
+				<s:SolidColorStroke color="0x404040" weight="1"/>
+			</s:stroke>			
+			<s:fill>
+				<s:LinearGradient rotation="45">
+					<s:entries>
+						<s:GradientEntry color="0xF0F0F0" ratio=".50"/>
+					</s:entries>					
+				</s:LinearGradient>			
+			</s:fill>
+		</s:Rect>
+		<s:Rect id="rect3" width="20" height="20" x="4" y="4" visible="false">
+			<s:stroke>
+				<s:SolidColorStroke color="0x606060" weight="1"/>
+			</s:stroke>			
+			<s:fill>
+				<s:LinearGradient rotation="45">
+					<s:entries>
+						<s:GradientEntry color="0xFFFFFF" ratio=".50"/>
+						<s:GradientEntry color="0xF0F0F0" ratio=".50"/>
+					</s:entries>					
+				</s:LinearGradient>			
+			</s:fill>			
+		</s:Rect>		
+		<mx:Image id="imgThumb" complete="imgThumb_completeHandler(event)" ioError="imgThumb_completeHandler(event)" />
+		<mx:Image id="imgOverlayImage" scaleContent="false"  source="@Embed('/assets/images/overlayImage.png')" click="itemClickHandler(event)" visible="false"/>		
+		<mx:Image id="imgOverlay" scaleContent="false"  source="@Embed('/assets/images/overlay.png')" visible="false"  />				
+	</s:Group>	
+	<mx:Image id="imgClip" source="{imageClip}" scaleContent="false" visible="false" />	
+	<components:IconButton right="0" top="0" id="btnClear" icon="{iconClear}" click="itemDeleteHandler(event)"/>	
+	<s:HGroup left="0" bottom="1" right="0" height="16" width="100%" verticalAlign="bottom" paddingTop="0" paddingBottom="0">
+		<s:Label id="lblName" text="{_detail.name}"  width="100%" textAlign="center" click="itemClickHandler(event)" maxDisplayedLines="1"/>		
+	</s:HGroup>
+</s:ItemRenderer>

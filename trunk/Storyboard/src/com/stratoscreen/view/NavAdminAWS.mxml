@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%"
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)"  xmlns:components="com.stratoscreen.components.*">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.*;
+			import com.stratoscreen.managers.AppManager;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+
+			[Bindable][Embed(source="/assets/icons/arrow_refresh.png")]
+			private var iconRefresh:Class;	
+			
+			private var _appManager:AppManager;
+			private var _shown:Boolean = false;
+			private var _validCF:Boolean = false;
+			private var _validS3:Boolean = false;
+			private var _validSDB:Boolean = false;
+			private var _validSES:Boolean = false;
+
+						
+			public function get isDirty():Boolean
+			{
+				return false;	// Use by the main navigator
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+
+
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (!_shown)
+				{
+					queryAWS();
+					_shown = true;
+				}
+			}
+
+			private function btnRefresh_clickHandler(event:Event):void
+			{
+				queryAWS();
+			}
+			
+			private function queryAWS():void
+			{
+				lblCF.text = "";
+				lblS3.text = "";
+				lblSDB.text = "";
+				lblSES.text = "";
+				
+				_appManager.cf.listDistributionsList(awsHandler);
+				_appManager.s3.listAllBuckets(awsHandler);
+				_appManager.sdb.select("Select * from Settings", awsHandler);
+				_appManager.ses.getQuota(awsHandler);
+				
+				var endpoint:AWSEndpoint = AWSRegions.getAWSEndpoint(_appManager.regionId);
+				lblRegion.text = endpoint.name;
+			}
+			
+			private function awsHandler(event:Object):void
+			{
+				var label:Label;
+				if (event is S3Event)
+				{
+					label = lblS3;	
+					_validS3 = event.success;
+				}
+				else if (event is SDBEvent)
+				{
+					label = lblSDB;
+					_validSDB = event.success;
+				}
+				else if (event is SESEvent)
+				{
+					label = lblSES;
+					_validSES = event.success;
+				}
+				else if (event is CFEvent)
+				{
+					label = lblCF;
+					_validCF = event.success;
+				}
+				
+				if (event.success)
+				{
+					label.text = "√";
+					label.setStyle("color","#008000");
+				}
+				else
+				{
+					label.text = "X";
+					label.setStyle("color","#FF00000");					
+				}
+			}
+			
+		]]>
+	</fx:Script>
+	<s:BorderContainer width="100%" height="184" styleName="Panel" >
+		<components:IconButton id="btnRefresh" icon="{iconRefresh}" toolTip="Refresh data"
+							   click="btnRefresh_clickHandler(event)"  right="5" top="5"/>
+		<s:Label x="10" y="10">
+			<s:text>Diagnostic information on the required AWS services. </s:text>
+		</s:Label>
+
+		<s:Label x="28" y="53" text="?" fontWeight="bold" color="#808080" id="lblCF"/>
+		<s:Label x="47" y="53" text="Cloudfront Service"/>
+		<s:Label x="28" y="71" text="?" fontWeight="bold" color="#808080" id="lblSES"/>
+		<s:Label x="47" y="71" text="Simple Email Service"/>
+		<s:Label x="28" y="89" text="?" fontWeight="bold" color="#808080" id="lblSDB"/>
+		<s:Label x="47" y="89" text="Simple Database Service"/>
+		<s:Label x="28" y="107" text="?" fontWeight="bold" color="#808080" id="lblS3"/>
+		<s:Label x="47" y="107" text="Simple Storage Service"/>
+		<s:Label x="9" y="35" text="Amazon Web Services" fontWeight="bold"/>
+		<s:Label x="9" y="139" text="Region" fontWeight="bold"/>
+		<s:Label x="28" y="156" id="lblRegion"/>
+	</s:BorderContainer>
+</s:NavigatorContent>

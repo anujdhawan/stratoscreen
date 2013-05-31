@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="10%" 
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)" xmlns:view="com.stratoscreen.view.*">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.aws.SESEvent;
+			import com.stratoscreen.controller.ForeignKeyControl;
+			import com.stratoscreen.events.ForeignKeyEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Users;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			private static const DETAIL_HEIGHT:int = 135;
+
+			private var _appManager:AppManager;
+			private var _shown:Boolean = false;
+			private var _deleteUser:Users;
+			private var _verifyUser:Users;
+			[Bindable] private var _users:ArrayCollection;
+			[Bindable] private var _selectedUser:Users;
+			
+			public function get isDirty():Boolean
+			{
+				return false;	// Use by the main navigator
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+								
+				//The nav may need a kick start
+				if (btnNew != null) {showHandler(null);}
+			}
+			
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (!_shown)
+				{
+					_shown = true;
+					this.parentDocument.enabled = false;
+					userDetail.addEventListener(GroupUserDetail.DETAIL_CLOSE, detailCloseHandler);
+					userDetail.addEventListener(GroupUserDetail.USER_DELETE, deleteUserHandler);
+					userDetail.addEventListener(GroupUserDetail.USER_EDIT, editUserHandler);
+					userDetail.addEventListener(GroupUserDetail.USER_EMAIL_VERIFY, verifyEmailHandler);
+					
+					hideDetail();
+						
+					var sql:String = "Select * from Users where accountId='" +_appManager.currentAccount.itemName + "' ";
+					_appManager.sdb.select(sql, queryUsersHandler, Users);
+				}
+			}
+			
+			private function queryUsersHandler(event:SDBEvent):void
+			{
+				this.parentDocument.enabled = true;
+				if (!event.success)
+				{
+					Alert.show("Could not get current user list. Please try again later", "Query Error");
+					return;
+				}
+				
+				_users = new ArrayCollection();
+				_users.source = event.result as Array;
+			}
+			
+			public function itemSelect(user:Users):void
+			{
+				_selectedUser = user;
+				userDetail.user = user;
+				userDetail.height = DETAIL_HEIGHT;
+				userDetail.visible = true;
+			}
+			
+			private function hideDetail():void
+			{
+				userDetail.height = 0;
+				userDetail.visible = false;	
+			}
+			
+			private function detailCloseHandler(event:Event):void
+			{
+				hideDetail();
+			}
+			
+			private function editUserHandler(event:Event):void
+			{
+			 	var winEdit:WinUserEdit = new WinUserEdit();
+				winEdit.user = event.target.user;
+				winEdit.addEventListener(CloseEvent.CLOSE, winEditCloseHandler);
+				PopUpManager.addPopUp(winEdit, this.parentApplication as DisplayObject, true);
+			}
+			
+			private function winEditCloseHandler(event:Event):void
+			{
+				if (event.target.canceled)	{return;}
+				
+				hideDetail();
+				
+				// reload the users
+				this.parentDocument.enabled = false;
+				var sql:String = "Select * from Users where accountId='" +_appManager.currentAccount.itemName + "' ";
+				_appManager.sdb.select(sql, queryUsersHandler, Users);
+			}
+			
+			private function deleteUserHandler(event:Event):void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				
+				_deleteUser = event.target.user;
+				
+				Alert.show("Do you want to " + _deleteUser.firstName + " " + _deleteUser.lastName + "?", "Delete User", Alert.YES | Alert.NO,
+					null, deleteAnswerHandler, null, Alert.NO); 
+			}
+			
+			private function deleteAnswerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.NO) 
+				{
+					_deleteUser = null;
+					return;
+				}
+				
+				this.parentDocument.enabled = false;
+				
+				var control:ForeignKeyControl = new ForeignKeyControl(_appManager);
+				control.checkUsers(_deleteUser.itemName, foreignKeyHandler);
+			}
+			
+			private function foreignKeyHandler(event:ForeignKeyEvent):void
+			{
+				var msg:String;
+				if (!event.success)
+				{
+					msg = "Could not confirm the file can be deleted. Please try again later";
+					Alert.show(msg, "Foreign Key Error");
+					this.parentDocument.enabled = true;
+					return;
+				}
+				
+				if (event.conflictFound)
+				{
+					msg = "Cannot delete " + _deleteUser.firstName + " " + _deleteUser.lastName + ". It is being used in the ";
+					msg += event.displayName + " table.\r\n";
+					msg += "Try disabling the user instead.";
+					Alert.show(msg, "User Conflict");
+					this.parentDocument.enabled = true;
+					return;
+				}
+
+				_deleteUser.deleted = true;
+				_appManager.sdb.updateDomain([_deleteUser], deleteMediaResultHandler);
+			}
+			
+			private function deleteMediaResultHandler(event:SDBEvent):void
+			{
+				try
+				{
+					if (!event.success)
+					{
+						this.parentDocument.enabled = true;
+						Alert.show("Could not delete user. Please try again", "Error");
+						return;
+					}
+					
+					// Reload the detail
+					var sql:String = "Select * from Users where accountId='" +_appManager.currentAccount.itemName + "' ";
+					_appManager.sdb.select(sql, queryUsersHandler, Users);
+					
+				}
+				finally
+				{
+					_deleteUser = null;
+					hideDetail();
+				}				
+			}
+			
+
+			protected function btnNew_clickHandler(event:MouseEvent):void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				
+				var winEdit:WinUserEdit = new WinUserEdit();
+				var user:Users = new Users();
+				user.accountId = _appManager.currentAccount.itemName;
+				user.newUser = true;
+				winEdit.user = user;
+				winEdit.addEventListener(CloseEvent.CLOSE, winEditCloseHandler);
+				PopUpManager.addPopUp(winEdit, this.parentApplication as DisplayObject, true);
+			}
+
+			
+			private function verifyEmailHandler(event:Event):void
+			{
+				_verifyUser = event.target.user;
+				
+				_appManager.ses.verifyEmailAddress(_verifyUser.email, sesVerifyHandler);
+			}
+			
+			private function sesVerifyHandler(event:SESEvent):void
+			{
+				if (event.success)
+				{
+					Alert.show("An verification email has been sent to " + _verifyUser.email, "Verification Email Sent"); 
+				}
+				else
+				{
+					Alert.show("Could not send verification to " + _verifyUser.email, "Email Error");
+				}
+			}
+		]]>
+	</fx:Script>
+	<s:VGroup height="100%" width="100%">
+		<s:BorderContainer styleName="Panel" height="100%" width="100%">
+			<s:VGroup left="10" top="10" bottom="10" right="10">
+				<s:BorderContainer height="100%" width="100%">
+					<s:List x="5" y="5" height="100%" width="100%" itemRenderer=" com.stratoscreen.renderers.UserItem" dataProvider="{_users}" borderVisible="false">
+						<s:layout>
+							<s:TileLayout orientation="rows"/>
+						</s:layout>			
+					</s:List>
+				</s:BorderContainer>
+				<view:GroupUserDetail id="userDetail" width="100%" />
+			</s:VGroup>
+		</s:BorderContainer>
+		<mx:Spacer height="25" />
+		<s:Button label="New User..." bottom="10" left="10" id="btnNew" click="btnNew_clickHandler(event)"/>		
+	</s:VGroup>
+</s:NavigatorContent>
+

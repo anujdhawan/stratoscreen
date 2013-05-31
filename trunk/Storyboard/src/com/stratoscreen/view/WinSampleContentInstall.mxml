@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="342" height="74" title="Installing sample content" 
+			   creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[			
+			import com.stratoscreen.controller.SampleContentInstall;
+			import com.stratoscreen.events.InstallEvent;
+			
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			private var _success:Boolean = false;
+			
+			public function get success():Boolean
+			{
+				return _success;
+			}
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.closeButton.visible = false;
+				PopUpManager.centerPopUp(this);
+				
+				var control:SampleContentInstall = new SampleContentInstall(this.parentApplication.appManager);
+				control.addEventListener(InstallEvent.SETUP_EVENT, installEventHandler);
+				control.start();
+			}
+			
+			private function installEventHandler(event:InstallEvent):void
+			{
+				txtStatus.text = event.message;				
+				if (event.status == InstallEvent.COMPLETE || event.status == InstallEvent.ERROR)
+				{
+					_success = event.success;
+					closeHandler(null);
+				}
+			}
+			
+			private function closeHandler(event:CloseEvent = null):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}			
+
+		]]>
+	</fx:Script>
+	<s:TextArea y="10" height="29" borderVisible="false" left="10" right="10" textAlign="center" id="txtStatus" editable="false"/>
+</s:TitleWindow>

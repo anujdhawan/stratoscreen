@@ -1,0 +1,1074 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*"  
+		 width="150" height="135" creationComplete="creationCompleteHandler(event)">
+	<fx:Declarations>
+		<components:MediaGroupOverlayCanvas id="mediaGroupOverlayCanvas" viewMode="{_viewMode}" clipAndEnableScrolling="false" />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.*;
+			import com.stratoscreen.model.views.*;
+			import com.stratoscreen.utils.*;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.Alert;
+			import mx.events.FlexEvent;
+			import mx.events.VideoEvent;
+			
+			import org.osmf.display.ScaleMode;
+			import org.osmf.events.MediaPlayerStateChangeEvent;
+			import org.osmf.media.MediaPlayerState;
+			
+			[Bindable][Embed(source="/assets/icons/control_play_blue.png")]
+			private var iconPlay:Class;			
+			[Bindable][Embed(source="/assets/icons/control_stop_blue.png")]
+			private var iconStop:Class;
+			[Bindable][Embed(source="/assets/icons/control_rewind_blue.png")]
+			private var iconPrevious:Class;
+			[Bindable][Embed(source="/assets/icons/control_fastforward_blue.png")]
+			private var iconNext:Class;
+			[Bindable][Embed(source="/assets/icons/arrow_out.png")]
+			private var iconZoom:Class;			
+			
+			[Bindable] public var fullScreen:Boolean = false;
+			public var fullScreenBounds:Rectangle = null;
+			
+			private var _appManager:AppManager;
+			private var _awsEndpoint:AWSEndpoint;
+			private var _channel:Channels;
+			private var _channelDetail:ArrayCollection;
+			private var _audioDetail:ArrayCollection;
+			private var _overlayDetail:ArrayCollection;
+			private var _index:int;
+			private var _subIndex:int;
+			private var _playing:Boolean;
+			private var _timer:Timer;
+			private var _startTime:Date;
+			private var _canvasElements:Array;
+			private var _firstPlayState:Boolean;
+			private var _bufferPause:Boolean;
+			private var _imageUtils:ImageUtils;
+			[Bindable] private var _viewMode:String = null;
+			private var _useTimerForSound:Boolean;
+			private var _soundPlayer:SoundPlayer;
+			private var _soundCanvas:ChannelSoundCanvas;
+			private var _mediaGroupOverlayCanvas:MediaGroupOverlayCanvas;
+
+			public function get viewMode():String
+			{
+				return _viewMode;
+			}
+			
+			public function set viewMode(value:String):void
+			{
+				_viewMode = value;
+			}	
+			
+			public function get channel():Channels
+			{
+				return _channel;
+			}
+			
+			public function set channel(value:Channels):void
+			{
+				if (groupControls == null) {return;} // Still renderering
+				if (value == null) {return;}
+
+				this.stop();
+				if (_soundCanvas != null) {_soundCanvas.stop();}
+				_channel = value;
+				lblBuffering.visible = false;		
+				_playing = false;		
+				this.enabled = false;
+				swfLoading.visible = true;
+				swfThumb.visible = false;
+				
+				// Get all detail for the  channel;
+				if (_appManager == null) {_appManager = this.parentApplication.appManager;}
+				if (_awsEndpoint == null) {_awsEndpoint = AWSRegions.getAWSEndpoint(_appManager.regionId);}
+				
+				if (_viewMode == null) {_viewMode = _appManager.currentAccount.defaultScreenView;}
+				_imageUtils = new ImageUtils(_viewMode);
+				
+				// Get the detail from the database
+				// Don't worry about the sort. We'll sort later
+				var sql:String = "Select * from ChannelDetail where channelId='" + _channel.itemName + "'";
+				_appManager.sdb.select(sql, queryDetailHandler, ChannelDetail);				
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_timer = new Timer(250);
+				_timer.addEventListener(TimerEvent.TIMER, timerHandler);
+				
+				videoDisplay.addEventListener(mx.events.VideoEvent.COMPLETE, videoCompleteHandler);				
+			}
+
+			
+			public function play():void
+			{
+				// Start the background Audio
+				if (_soundCanvas == null) {_soundCanvas = new ChannelSoundCanvas(_appManager);}
+				_soundCanvas.play(_audioDetail, false);
+				
+				channelOverlayCanvas.play(_overlayDetail, false);
+				
+				_index = -1;	// We want to at zero
+				_subIndex = 0;	// SubIndexs are treated differently from Index
+				_playing = true;
+				playNextMedia();
+			}
+			
+			public function stop():void
+			{
+				try
+				{
+					canvas.removeAllElements();
+					_timer.stop();
+					if (_soundCanvas != null) {_soundCanvas.stop();}
+					if (_mediaGroupOverlayCanvas != null) 
+					{
+						_mediaGroupOverlayCanvas.stop();
+						mediaGroupOverlay.removeAllElements();
+						_mediaGroupOverlayCanvas.addEventListener(MediaGroupOverlayCanvas.OVERLAY_COMPLETE, mediaGroupOverlayCompleteHandler);
+						_mediaGroupOverlayCanvas = null;
+					} 
+					channelOverlayCanvas.stop();
+					videoDisplay.stop();
+					videoDisplay.visible = false;
+					swfThumb.visible = true;
+					_playing = false;
+					effectEndHandler("");	// Remove any remaining Swf Previews. Passing a blank id will clear all
+					setButtons();
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err, 2, LogUtils.WARN);
+				}
+			}
+			
+			private function queryDetailHandler(event:SDBEvent):void
+			{
+				if (!event.result)
+				{
+					this.enabled = true;
+					Alert.show("Could not load Channel Detail. Please try again later", "Load Error");
+					return;
+				}
+			
+				// The order is important. Use a temp array to rebuild the items
+				var results:ArrayCollection = new ArrayCollection(event.result as Array);
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("orderInt", false, false, true)];
+				results.sort = sort;
+				results.refresh();
+				
+				_channelDetail = new ArrayCollection();
+				for each (var detail:ChannelDetail in results)
+				{
+					_channelDetail.addItem(detail);
+				}				
+
+				// Start the load process. We may have sub detail
+				_index = -1;
+				loadSubDetail();
+			}
+			
+			private function loadSubDetail(event:SDBEvent = null):void
+			{
+				try
+				{
+					if (event is SDBEvent)
+					{
+						if (!event.success) {throw new Error(event.message);}
+					
+						// If this is a group we may need to reorganize the data 
+						switch (_channelDetail[_index].type)
+						{
+							case ChannelDetail.TYPE_GROUP:
+							case ChannelDetail.TYPE_GROUP_OVERLAY:	
+								var showUtils:ShowUtils = new ShowUtils();
+								var mediaGroup:MediaGroups = Utils.copyClassObject(MediaGroups, _channelDetail[_index]);
+								mediaGroup.type = _channelDetail[_index].groupType;
+								_channelDetail[_index].subDetail = showUtils.arrangeGroup(mediaGroup, event.result as Array);
+								break;
+							
+							case ChannelDetail.TYPE_OVERLAY:
+								_channelDetail[_index].subDetail = event.result as Array;
+								break;
+						}
+					}
+					
+					_index++;
+					
+					// All the detail is loaded
+					// Loop again for the Overlay items for any media group overlays
+					if (_index >= _channelDetail.length)
+					{
+						_index = -1;						
+						loadMGOverlayDetail();
+						
+						return;
+					}
+					
+					switch (_channelDetail[_index].type)
+					{
+						case ChannelDetail.TYPE_MEDIA:
+							// No need to get sub detail. 
+							// Move to the next items
+							this.callLater(loadSubDetail);
+							break;
+						
+						case ChannelDetail.TYPE_GROUP:
+							var sql:String = "Select * from MediaGroupDetail where mediaGroupId='";
+							sql += _channelDetail[_index].mediaId + "' and playOrder is not null ";
+							sql += " order by playOrder";	
+							_appManager.sdb.select(sql, loadSubDetail, MediaGroupDetail);
+							break;
+						
+						case ChannelDetail.TYPE_OVERLAY:
+							sql = "Select * from OverlayDetail where overlayId = '" + _channelDetail[_index].mediaId + "' ";
+							sql += "and z is not null order by z";
+							_appManager.sdb.select(sql, loadSubDetail, OverlayDetail);		
+							break;
+
+						case ChannelDetail.TYPE_GROUP_OVERLAY:
+							sql = "Select * from MediaGroupDetail where mediaGroupId='";
+							sql += _channelDetail[_index].mediaGroupId + "' and playOrder is not null ";
+							sql += " order by playOrder";	
+							_appManager.sdb.select(sql, loadSubDetail, MediaGroupDetail);
+							break;
+					}
+					
+				}
+				catch (err:Error)
+				{
+					Alert.show("Could not load Channel sub detail. Please try again later", "Load Error");
+					LogUtils.writeErrorToLog(err);
+					this.enabled = true;
+				}
+			}
+			
+			/**
+			 * Load the Overlay detail for a Media Group Overlay and play in the subDetail2 array
+			 */ 
+			private function loadMGOverlayDetail(event:SDBEvent = null):void
+			{
+				try
+				{
+					if (event is SDBEvent)
+					{
+						if (!event.success) {throw new Error(event.message);}
+						
+						switch (_channelDetail[_index].type)
+						{
+							case ChannelDetail.TYPE_GROUP_OVERLAY:	
+								_channelDetail[_index].subDetail2 = event.result as Array;
+								break;
+						}
+					}
+					
+					_index++;
+					
+					// All the detail is loaded
+					// Loop once again and find Media for the Overlays
+					if (_index >= _channelDetail.length)
+					{
+						_index = -1;						
+						loadOverlayMedia();
+						
+						return;
+					}
+					
+					switch (_channelDetail[_index].type)
+					{
+						case ChannelDetail.TYPE_GROUP_OVERLAY:
+							var sql:String = "Select * from OverlayDetail where overlayId = '" + _channelDetail[_index].mediaId + "' ";
+							sql += "and z is not null order by z";
+							_appManager.sdb.select(sql, loadMGOverlayDetail, OverlayDetail);		
+							break;
+
+						default:
+							// Ignore anything that is not a Media Group Overlay
+							this.callLater(loadMGOverlayDetail);
+							break;
+					}
+					
+				}
+				catch (err:Error)
+				{
+					Alert.show("Could not load media group overlay detail. Please try again later", "Load Error");
+					LogUtils.writeErrorToLog(err);
+					this.enabled = true;
+				}				
+			}
+
+			
+			private function loadOverlayMedia():void
+			{
+				_index ++;
+				
+				// Evertthing is loaded
+				// Perform one more step before the preview starts
+				if (_index >= _channelDetail.length)
+				{
+					seperateChannelDetail();
+					return;
+				}
+				
+				// If this is not an overlay just move on to the next
+				if (_channelDetail[_index].type == ChannelDetail.TYPE_OVERLAY || 
+					_channelDetail[_index].type == ChannelDetail.TYPE_GROUP_OVERLAY)
+				{
+					_subIndex = -1;
+					loadOverlayDetailMedia();
+				}				
+				else
+				{
+					loadOverlayMedia();				
+				}
+			}
+			
+			private function seperateChannelDetail():void
+			{
+				// Seperate the channel detail into three collections
+				//  1. The Main detail
+				//  2. Background Audio
+				//  3. Channel overlays
+				//
+				// Each one will have a different process for looping through the content
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("order")];
+				
+				_channelDetail.filterFunction = filterChannelDetail;
+				_channelDetail.sort = sort;
+				_channelDetail.refresh();
+				
+				_audioDetail = new ArrayCollection(_channelDetail.source);
+				_audioDetail.filterFunction =  filterAudioDetail;
+				_audioDetail.sort = sort;
+				_audioDetail.refresh();
+
+				_overlayDetail = new ArrayCollection(_channelDetail.source);
+				_overlayDetail.filterFunction =  filterOverlayDetail;
+				_overlayDetail.sort = sort;
+				_overlayDetail.refresh();
+				
+				// Load the thumbnail of the first item					
+				var url:String;
+				url = "https://" + _awsEndpoint.s3 + "/" + _appManager.currentAccount.bucket;
+				url += "/" + Constants.THUMB_PREFIX + _channelDetail[0].firstMediaId + Constants.THUMB_EXTENSION;
+						
+				swfThumb.visible = true;
+				swfThumb.load(url);
+			}
+			
+			private function loadOverlayDetailMedia(event:SDBEvent = null):void
+			{
+				try
+				{
+					// Get the correct subDetail array
+					// It will differ if this is a Media Group Overlay
+					var subDetail:Array = _channelDetail[_index].type == ChannelDetail.TYPE_GROUP_OVERLAY ?
+						                  _channelDetail[_index].subDetail2 : _channelDetail[_index].subDetail; 
+
+					if (event != null)
+					{
+						if (!event.success) {throw new Error(event.message);}						
+						subDetail[_subIndex].media = event.result[0];
+						
+						subDetail[_subIndex].localUrl = _appManager.s3.getSelectURL(_appManager.currentAccount.bucket, subDetail[_subIndex].mediaId);	
+					}
+
+					_subIndex ++;
+					
+					// If we read everything return to the calling function
+					if (_subIndex >= subDetail.length)
+					{
+						loadOverlayMedia();
+						return;
+					}					
+					
+					// Skip the Text 
+					if (subDetail[_subIndex].type == OverlayDetail.TYPE_TEXT)
+					{
+						loadOverlayDetailMedia()
+						return;
+					}
+					
+					var sql:String = "Select * from Medias where itemName() = '" + subDetail[_subIndex].mediaId + "'";
+					_appManager.sdb.select(sql,  loadOverlayDetailMedia, Medias);		
+				}
+				catch (err:Error)
+				{
+					Alert.show("Could not load Overlay media detail. Please try again later", "Load Error");
+					LogUtils.writeErrorToLog(err);
+					this.enabled = true;
+				}				
+			}
+											  
+				
+			protected function swfThumb_completeHandler(event:Event):void
+			{
+				try
+				{					
+					var boxWidth:Number = groupPreview.width;
+					var boxHeight:Number = groupPreview.height;
+					if (fullScreenBounds != null)
+					{
+						boxWidth = fullScreenBounds.width;
+						boxHeight = fullScreenBounds.height;
+					}				
+					var rect:ResizeRectangle= _imageUtils.getBestFit(event.target.content.width, event.target.content.height, boxWidth,boxHeight, fullScreen);
+
+					swfThumb.x = rect.x;
+					swfThumb.y = rect.y;
+					swfThumb.width = rect.width;
+					swfThumb.height = rect.height;		
+					
+					swfLoading.visible = false;
+					this.enabled = true;
+				}			
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					swfThumb.visible = false;
+				}
+				finally
+				{
+					setButtons();
+				}
+			}
+			
+			private function timerHandler(event:TimerEvent):void
+			{
+				var media:Medias;
+				switch (_channelDetail[_index].type)
+				{
+					case ChannelDetail.TYPE_MEDIA:
+						media = convertToMediasObject(_index);
+						break;
+					
+					case ChannelDetail.TYPE_OVERLAY:
+						media = convertToMediasObject(_index);
+						break;
+					
+					case ChannelDetail.TYPE_GROUP:
+					case ChannelDetail.TYPE_GROUP_OVERLAY:	
+						media = convertToMediasObject(_index, _subIndex);
+						break;
+				}
+
+				
+				// Keep track of how long the media has played
+				var duration:int = parseInt(media.duration);
+				if (duration == 0)	{return;} 	// We are waiting for the media to stop by itself
+				
+				var now:Date = new Date();
+				var milliElapsed:Number = now.time - _startTime.time;
+				
+				if (milliElapsed > (duration * 1000))
+				{
+					playNextMedia();
+				}
+			}
+			
+			public function playNextMedia():void
+			{
+				var media:Medias = null;				
+				_firstPlayState = true;				
+				canvas.removeAllElements();
+				_canvasElements = null;
+				
+				// Stop the existing
+				if (_index >= 0)
+				{
+					if (_channelDetail[_index].mediaType == Constants.MEDIA_TYPE_VIDEO)
+					{
+						videoDisplay.stop();			
+					}
+					
+					if (_soundPlayer != null) {_soundPlayer.stop();}
+					
+					// Increment based on the type
+					switch (_channelDetail[_index].type)
+					{
+						case ChannelDetail.TYPE_MEDIA:
+						case ChannelDetail.TYPE_OVERLAY:
+							_index ++;
+							break;
+						
+						case ChannelDetail.TYPE_GROUP:
+							_subIndex ++;
+							if (_subIndex >= _channelDetail[_index].subDetail.length)
+							{
+								_subIndex = 0;
+								_index ++;
+							}
+							break;
+						
+						case ChannelDetail.TYPE_GROUP_OVERLAY:
+							_subIndex ++;							
+							if (_subIndex >= _channelDetail[_index].subDetail.length)
+							{
+								// We have played all the items in the Media Group
+
+								// What is controlling this media overlay?
+								// The Media Group or the Media Group Overlay Duraction?
+								var duration:int = parseInt(_channelDetail[_index].duration);
+								var stopOverlay:Boolean = false; 
+								
+								if (duration <= 0)
+								{
+									stopOverlay = true;
+								}
+								else
+								{
+									if (_mediaGroupOverlayCanvas.isPlaying)
+									{										
+										_subIndex = 0; // Start the Media Group again
+									}
+									else
+									{
+										stopOverlay =  true;
+									}
+								}
+
+								if (stopOverlay && _mediaGroupOverlayCanvas != null) 
+								{
+									_subIndex = 0;
+									_index ++;
+
+									if (_mediaGroupOverlayCanvas != null) 
+									{
+										_mediaGroupOverlayCanvas.stop();
+										mediaGroupOverlay.removeAllElements();
+										_mediaGroupOverlayCanvas.addEventListener(MediaGroupOverlayCanvas.OVERLAY_COMPLETE, mediaGroupOverlayCompleteHandler);
+										_mediaGroupOverlayCanvas = null;
+									} 
+								}
+							}
+							break;
+					}
+				}
+				else
+				{
+					_index ++;	// start at the first item.
+				}				
+				
+				// Stop the process if we played too many
+				if (_index >= _channelDetail.length)
+				{
+					this.stop();
+					return;
+				}
+				
+				// Play the next item in the list. We'll need to prepare the objects first 
+				_timer.stop();
+				lblBuffering.visible = false;
+				videoDisplay.stop();
+				videoDisplay.visible = false;
+				swfThumb.visible = false;
+				swfLoading.visible = true;
+				
+				switch (_channelDetail[_index].type)
+				{
+					case ChannelDetail.TYPE_MEDIA:
+					case ChannelDetail.TYPE_OVERLAY:
+						media = convertToMediasObject(_index);
+						break;
+					
+					case ChannelDetail.TYPE_GROUP:
+						media = convertToMediasObject(_index, _subIndex);
+						break;
+					
+					case ChannelDetail.TYPE_GROUP_OVERLAY:
+						media = convertToMediasObject(_index, _subIndex);
+						if (_mediaGroupOverlayCanvas == null) 
+						{ 
+							var overlayWidth:Number = parseFloat(_channelDetail[_index].width);
+							var overlayHeight:Number = parseFloat(_channelDetail[_index].height);							
+							var overlayDetail:Array = _channelDetail[_index].subDetail2;
+							var overlayDuration:int = parseInt(_channelDetail[_index].duration);
+							var rect:ResizeRectangle = _imageUtils.getBestFit(overlayWidth, overlayHeight, mediaGroupOverlay.width, mediaGroupOverlay.height);
+							
+							_mediaGroupOverlayCanvas = new MediaGroupOverlayCanvas();
+							_mediaGroupOverlayCanvas.x = rect.x ;
+							_mediaGroupOverlayCanvas.y = rect.y;
+							_mediaGroupOverlayCanvas.width = overlayWidth;
+							_mediaGroupOverlayCanvas.height = overlayHeight;
+							_mediaGroupOverlayCanvas.scaleX = rect.scaleX;
+							_mediaGroupOverlayCanvas.scaleY = rect.scaleY;
+							
+							mediaGroupOverlay.addElement(_mediaGroupOverlayCanvas);
+							if (overlayDuration > 0) {_mediaGroupOverlayCanvas.addEventListener(MediaGroupOverlayCanvas.OVERLAY_COMPLETE, mediaGroupOverlayCompleteHandler);}
+							_mediaGroupOverlayCanvas.play(overlayDetail, overlayDuration, false);
+						}					
+						break;
+				}
+
+				var bucket:String = _appManager.currentAccount.bucket
+					
+				// Watch for Accelerated items. We cannot show the actual file.
+				// Show the thumbnail instead
+				var previewUrl:String;
+				if (media.accelerated == "1")
+				{
+					var thumb:String = Constants.THUMB_PREFIX + media.itemName + Constants.THUMB_EXTENSION;
+					previewUrl = _appManager.s3.getSelectURL(bucket, thumb);
+				}
+				else
+				{
+					previewUrl = _appManager.s3.getSelectURL(bucket, media.itemName);
+				}
+				
+				var boxWidth:Number = groupPreview.width;
+				var boxHeight:Number = groupPreview.height;
+				if (fullScreenBounds != null)
+				{
+					boxWidth = fullScreenBounds.width;
+					boxHeight = fullScreenBounds.height;
+				}				
+				rect= _imageUtils.getBestFit(parseFloat(media.width), parseFloat(media.height), boxWidth,boxHeight, fullScreen);
+
+				switch (media.mediaType)
+				{
+					case Constants.MEDIA_TYPE_IMAGE:
+					case Constants.MEDIA_TYPE_SWF:
+						videoDisplay.source = null;
+						var swfPreview:SWFPreviewLoader = new SWFPreviewLoader();
+						swfPreview.mediaId = media.itemName;
+						swfPreview.duration = parseInt(media.duration);
+						swfPreview.frames = parseInt(media.frames);
+						swfPreview.effectId = media.effectId;
+						swfPreview.signedUrl = previewUrl;
+						swfPreview.previewWidth = groupPreview.width;
+						swfPreview.previewHeight = groupPreview.height;
+						swfPreview.fullScreen = this.fullScreen;
+						swfPreview.fullScreenBounds = this.fullScreenBounds;
+						swfPreview.viewMode = _viewMode;
+						swfPreview.callbackLoaded = mediaLoadedHandler;
+						swfPreview.callbackComplete = mediaEndHandler;
+						swfPreview.callbackEffectEnd = effectEndHandler;
+						groupPreview.addElement(swfPreview);
+						
+						break;
+					
+					case Constants.MEDIA_TYPE_AUDIO:
+						swfLoading.visible = true;
+						effectEndHandler("");	// Remove any remaining Swf Previews. Passing a blank id will clear all
+						
+						_soundPlayer = new SoundPlayer(previewUrl);
+						_soundPlayer.addEventListener(SoundPlayer.SOUND_START, soundStartHandler);
+						_soundPlayer.addEventListener(SoundPlayer.SOUND_END, soundEndHandler);
+						_soundPlayer.play();
+						_useTimerForSound = parseInt(media.duration) == 0;
+						
+						swfLoading.visible = false;
+						swfThumb.visible = true;
+						break;					
+					
+					case Constants.MEDIA_TYPE_VIDEO:
+						effectEndHandler("");	// Remove any remaining Swf Previews. Passing a blank id will clear all
+						videoDisplay.source = previewUrl;
+						videoDisplay.x = rect.x;
+						videoDisplay.y = rect.y;
+						videoDisplay.width = rect.width;
+						videoDisplay.height = rect.height;
+						videoDisplay.scaleMode = _viewMode == Constants.VIEW_LETTERBOX ?  ScaleMode.LETTERBOX : ScaleMode.STRETCH;
+						break;
+				}		
+
+				// Set up the canvas too for the overlays
+				canvas.x = rect.x;
+				canvas.y = rect.y;
+				canvas.width = parseFloat(media.width);
+				canvas.height = parseFloat(media.height);
+				canvas.scaleX = rect.scaleX;				
+				canvas.scaleY = rect.scaleY;
+				
+				setButtons();
+			}
+			
+			private function convertToMediasObject(index:int, subIndex:int = 0):Medias
+			{
+				var media:Medias = null;
+				
+				switch (_channelDetail[index].type)
+				{
+					case ChannelDetail.TYPE_MEDIA:
+						media = Utils.copyClassObject(Medias, _channelDetail[index]);
+						media.itemName = _channelDetail[index].mediaId;
+						break;
+
+					case ChannelDetail.TYPE_OVERLAY:
+						// Find the base item. It is the media item used for the background
+						media = _appManager.getMedia(_channelDetail[index].firstMediaId);
+						media.effectId = _channelDetail[index].effectId;
+						media.duration = _channelDetail[index].duration;
+						media.frames = _channelDetail[index].frames;
+						media.accelerated = _channelDetail[index].accelerated;
+						break;
+
+					case ChannelDetail.TYPE_GROUP:
+					case ChannelDetail.TYPE_GROUP_OVERLAY:
+						media = Utils.copyClassObject(Medias, _channelDetail[index]);
+						media.name = _channelDetail[index].subDetail[subIndex].name;
+						media.itemName = _channelDetail[index].subDetail[subIndex].mediaId;
+						media.duration = _channelDetail[index].subDetail[subIndex].duration;
+						media.frames = _channelDetail[index].subDetail[subIndex].frames;
+						media.mimeType = _channelDetail[index].subDetail[subIndex].mimeType;
+						media.width = _channelDetail[index].subDetail[subIndex].width;
+						media.height = _channelDetail[index].subDetail[subIndex].height;	
+						media.effectId = _channelDetail[index].subDetail[subIndex].effectId;
+						media.accelerated =  _channelDetail[index].subDetail[subIndex].accelerated;
+						break;
+				}
+				
+				return media;
+			}
+			
+			protected function swfThumb_ioErrorHandler(event:IOErrorEvent):void
+			{
+				swfThumb.visible = false;;	// Just blank it for now
+				setButtons();
+			}
+			
+			private function videoCompleteHandler(event:Event):void
+			{
+				playNextMedia();
+			}
+			
+			protected function videoDisplay_mediaPlayerStateChangeHandler(event:MediaPlayerStateChangeEvent):void
+			{
+				switch (event.state)
+				{
+					case MediaPlayerState.BUFFERING:
+						lblBuffering.y = videoDisplay.y + videoDisplay.height - 40;
+						lblBuffering.visible = true;
+						
+						// Stop the timers on the overlay detail if we pause						
+						if (_canvasElements != null)
+						{
+							for (var i:int = 0; i < _canvasElements.length; i++)
+							{
+								_canvasElements[i].paused = true;
+								_bufferPause = true;
+							}							
+						}						
+						break;
+					
+					case MediaPlayerState.PLAYING:
+						if (!_timer.running) 
+						{
+							_startTime = new Date();
+							_timer.start();
+						}
+						lblBuffering.visible = false;
+						videoDisplay.visible = true;
+						swfLoading.visible = false;
+						
+						if (_channelDetail[_index].type == ChannelDetail.TYPE_OVERLAY)
+						{
+							if (_firstPlayState)
+							{
+								addOverlayDetail();
+								_firstPlayState = false;
+							}
+						}
+						
+						// Restart the element timers if we are finished buffering
+						if (_bufferPause)
+						{
+							if (_canvasElements != null)
+							{
+								for (i= 0; i < _canvasElements.length; i++)
+								{
+									_canvasElements[i].paused = false;
+								}							
+							}	
+							_bufferPause = false;
+						}						
+						break;
+					
+					case MediaPlayerState.PAUSED:
+						// Not sure why but the VideoDisplay is pausing 
+						// on play
+						if (_playing) {videoDisplay.play();}
+						break;
+
+					default:
+						lblBuffering.visible = false;
+				}				
+			}			
+
+			private function mediaGroupOverlayCompleteHandler(event:Event):void
+			{
+				// Rerun the next Next Media Routine, 
+				// and force it to continue
+				
+				_subIndex = int.MAX_VALUE / 2; 	//I doubt anyone has a show with 1,073,741,824 items
+				playNextMedia();
+			}
+
+			private function setButtons():void
+			{
+				btnPrevious.enabled = _playing && _index > 0;
+				btnPlay.enabled = !_playing;
+				btnStop.enabled = _playing;
+				btnNext.enabled = _playing && !isLastMedia();				
+			}
+			
+			private function isLastMedia():Boolean
+			{
+				// If the group is the last item it will turn off the 'Next'
+				// button too early
+				if (_index < (_channelDetail.length - 1)) {return false;}
+				
+				if (_channelDetail[_index].type == ChannelDetail.TYPE_GROUP)
+				{
+					if (_subIndex < _channelDetail[_index].subDetail.length) {return false;}
+				}
+				
+				// If we are here we must be at the end
+				return true;
+			}
+			
+			protected function btnPrevious_clickHandler(event:MouseEvent):void
+			{
+				if (_soundPlayer != null) {_soundPlayer.stop();}
+				stopSwfPreviews()
+				_index = _index - 2;
+				playNextMedia();
+			}
+			
+			protected function btnPlay_clickHandler(event:MouseEvent):void
+			{
+				this.play();
+			}
+			
+			
+			protected function btnStop_clickHandler(event:MouseEvent):void
+			{
+				swfLoading.visible = false;
+				if (_soundPlayer != null) {_soundPlayer.stop();}
+				stopSwfPreviews()
+				this.stop();
+			}
+			
+			protected function btnNext_clickHandler(event:MouseEvent):void
+			{
+				if (_soundPlayer != null) {_soundPlayer.stop();}
+				stopSwfPreviews()
+				playNextMedia();
+			}
+
+			protected function btnZoom_clickHandler(event:MouseEvent):void
+			{
+				this.stop();
+				this.parentApplication.storyboard.showLargePreview(Constants.PREVIEW_CHANNEL, _channel);
+			}
+
+			private function addOverlayDetail():void
+			{
+				_canvasElements = new Array();
+				
+				for each (var detail:OverlayDetail in _channelDetail[_index].subDetail)
+				{
+					switch (detail.type)
+					{
+						case OverlayDetail.TYPE_TEXT:
+							var text:OverlayDisplayText = new OverlayDisplayText();
+							text.overlayDetail = detail;
+							
+							text.text = detail.text;
+							text.x = parseFloat(detail.x);
+							text.y = parseFloat(detail.y);
+							text.width = parseFloat(detail.width);
+							text.height = parseFloat(detail.height);
+							text.rotation = parseFloat(detail.rotate);
+							text.alpha =  parseFloat(detail.alpha);
+							text.setStyle("color", "#" + detail.color);
+							text.setStyle("fontFamily", detail.fontFamily);
+							text.setStyle("fontSize", detail.fontSize);
+							text.setStyle("fontStyle", detail.fontStyle);
+							text.setStyle("fontWeight", detail.fontWeight);
+							text.setStyle("textDecoration", detail.textDecoration);
+							text.visible = false;	// The controll will set back to visible
+							
+							canvas.addElement(text);
+							_canvasElements.push(text);
+							break;
+						
+						case OverlayDetail.TYPE_MEDIA:
+							if (detail.isImage || detail.isSWF)
+							{							
+								var swf:OverlayDisplaySWF = new OverlayDisplaySWF();
+								swf.overlayDetail = detail;
+								swf.x = parseFloat(detail.x);
+								swf.y = parseFloat(detail.y);
+								swf.width = parseFloat(detail.width);
+								swf.height = parseFloat(detail.height);
+								swf.rotation = parseFloat(detail.rotate);
+								swf.alpha =  parseFloat(detail.alpha);			
+								
+								canvas.addElement(swf);
+								_canvasElements.push(swf);
+							}
+							else if (detail.isVideo)
+							{
+								var vid:OverlayDisplayVideo = new OverlayDisplayVideo();
+								vid.appManager = this.parentApplication.appManager;
+								vid.overlayDetail = detail;
+								vid.x = parseFloat(detail.x);
+								vid.y = parseFloat(detail.y);
+								vid.width = parseFloat(detail.width);
+								vid.height = parseFloat(detail.height);
+								
+								canvas.addElement(vid);
+								_canvasElements.push(vid);								
+							}
+							else if (detail.isAudio)
+							{
+								var aud:OverlayDisplayAudio = new OverlayDisplayAudio();
+								aud.overlayDetail = detail;
+								
+								canvas.addElement(aud);
+								_canvasElements.push(aud);								
+							}	
+							break;
+					}
+				}				
+			}
+			
+			private function mediaLoadedHandler(event:Event = null):void
+			{
+				swfLoading.visible = false;
+
+				if (_channelDetail[_index].type == ChannelDetail.TYPE_OVERLAY)
+				{
+					addOverlayDetail();
+				}
+			}			
+			
+			private function mediaEndHandler():void
+			{
+				if (_playing) {playNextMedia();}
+			}
+			
+			private function effectEndHandler(mediaId:String, loopCount:int = 0):void
+			{
+				// Avoid infinte loop
+				if (loopCount > 5) {return;}
+				
+				// Loop through and remove the media that is complete
+				var elementRemoved:Boolean = false;
+				for (var i:int = 0; i < groupPreview.numElements; i++)
+				{
+					if (groupPreview.getElementAt(i) is SWFPreviewLoader)
+					{
+						var swfPreview:SWFPreviewLoader = groupPreview.getElementAt(i) as SWFPreviewLoader;
+						if (swfPreview.mediaId != mediaId)
+						{
+							groupPreview.removeElementAt(i);
+							swfPreview.dispose();
+							elementRemoved = true;
+							break;
+						}
+					}
+				}
+				
+				// Call recursively until we are clean
+				if (elementRemoved) {effectEndHandler(mediaId, loopCount +1);}
+			}
+			
+			private function stopSwfPreviews():void
+			{
+				// Clear all the event handlers in the existing swf previews
+				for (var i:int = 0; i < groupPreview.numElements; i++)
+				{
+					if (groupPreview.getElementAt(i) is SWFPreviewLoader)
+					{
+						var swfPreview:SWFPreviewLoader = groupPreview.getElementAt(i) as SWFPreviewLoader;
+						swfPreview.stop();
+					}
+				}				
+			}
+			
+			private function soundStartHandler(event:Event):void
+			{
+				swfLoading.visible = false;
+				swfThumb.visible = true;
+				
+				if (!_timer.running) 
+				{
+					_startTime = new Date();
+					_timer.start();
+				}
+			}
+			
+			private function soundEndHandler(event:Event):void
+			{
+				// Ignore the end if the user asks for the sound to play past the actual duration
+				if (!_useTimerForSound) {playNextMedia();}
+			}		
+			
+			private function filterChannelDetail(item:Object):Boolean
+			{
+				return (item.audioTrack != "1" &&  item.channelOverlay != "1");
+			}
+
+			private function filterAudioDetail(item:Object):Boolean
+			{
+				return item.audioTrack == "1"; 
+			}
+			
+			private function filterOverlayDetail(item:Object):Boolean
+			{
+				return item.channelOverlay == "1"; 
+			}
+
+		]]>
+	</fx:Script>
+	<mx:SWFLoader id="swfLoading" horizontalCenter="0" verticalCenter="0" width="100" height="100" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>
+	<s:Group id="groupPreview" left="0" top="0" bottom="0" right="0"  clipAndEnableScrolling="true">
+		<mx:SWFLoader id="swfThumb" complete="swfThumb_completeHandler(event)" ioError="swfThumb_ioErrorHandler(event)" autoLoad="false" scaleContent="true" maintainProjectionCenter="true" maintainAspectRatio="false"/>
+		<s:VideoDisplay id="videoDisplay"  mediaPlayerStateChange="videoDisplay_mediaPlayerStateChangeHandler(event)" autoPlay="true" maxHeight="{groupPreview.height}" maxWidth="{groupPreview.width}"/>
+	</s:Group>
+
+	<!-- Keep the groupOverlay the same exact size of the groupPreview, but on top -->
+	<s:Group id="groupOverlay" left="0" top="0" bottom="0" right="0" clipAndEnableScrolling="true">
+		<!-- only used for Media Overlays. Not Media Group Overlays -->
+		<s:Group id="canvas" />
+	</s:Group>
+	
+	<!-- Create the canvas needed for the Media Group Overlays -->
+	<s:Group id="mediaGroupOverlay" left="0" top="0" bottom="0" right="0" clipAndEnableScrolling="true">	
+		<!-- only used for Media Group Overlays. Not Media Overlays -->
+	</s:Group>
+	
+	<components:ChannelOverlayCanvas id="channelOverlayCanvas" viewMode="{_viewMode}" clipAndEnableScrolling="false" />
+
+	<s:Label id="lblBuffering" text="Buffering" width="100%" alpha=".25" styleName="Buffering" bottom="40"/>
+	<s:HGroup id="groupControls" height="22" left="0" bottom="0" verticalAlign="middle" gap="1" right="22">
+		<mx:Spacer width="100%" />
+		<components:IconButton id="btnPrevious" icon="{iconPrevious}"  click="btnPrevious_clickHandler(event)"/>
+		<components:IconButton id="btnPlay" icon="{iconPlay}"  click="btnPlay_clickHandler(event)"/>
+		<components:IconButton id="btnStop" icon="{iconStop}" click="btnStop_clickHandler(event)"/>
+		<components:IconButton id="btnNext" icon="{iconNext}"  click="btnNext_clickHandler(event)"/>
+		<mx:Spacer width="100%" />		
+	</s:HGroup>
+	<components:IconButton id="btnZoom" icon="{iconZoom}" right="0" visible="{!fullScreen}"
+						   click="btnZoom_clickHandler(event)" toolTip="Preview in larger window" bottom="0"/>
+
+</s:Group>

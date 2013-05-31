@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					   xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:view="com.stratoscreen.view.*" 
+					   minWidth="1000" minHeight="750" preinitialize="preinitializeHandler(event)" 
+					   creationComplete="creationCompleteHandler(event)" addedToStage="this_addedToStageHandler(event)"  
+					   closing="closingHandler(event)" resize="resizeHandler(event)">
+	<fx:Style source="/assets/css/style.css"/>
+	<fx:Style source="/assets/css/fonts.css"/>
+	<fx:Script>
+		<![CDATA[
+			import air.update.ApplicationUpdater;
+			import air.update.ApplicationUpdaterUI;
+			import air.update.events.UpdateEvent;
+			
+			import com.roguedevelopment.objecthandles.ObjectHandles;
+			import com.roguedevelopment.objecthandles.VisualElementHandle;
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.AppSettings;
+			import com.stratoscreen.utils.LogUtils;
+			
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ResizeEvent;
+			import mx.managers.PopUpManager;
+			
+			//public static const UPDATE_URL:String = "http://updates.stratoscreen.com/storyboardUpdate.xml";
+			public static const UPDATE_URL:String = "https://s3.amazonaws.com/stratoupdate/storyboardUpdate.xml";
+			
+			private var _appManager:AppManager;
+			private var _updater:ApplicationUpdaterUI;
+			
+			public function get appManager():AppManager
+			{
+				return _appManager;
+			}
+			
+			protected function preinitializeHandler(event:FlexEvent):void
+			{
+				// Get the bucket from the descriptor
+				var appName:String = "";
+				var appVersion:String = "";
+				var bucket:String = "";
+				var xmlDoc:XMLDocument = new XMLDocument(NativeApplication.nativeApplication.applicationDescriptor);
+				for each(var xmlNode:XMLNode in xmlDoc.childNodes[0].childNodes)
+				{
+					if (xmlNode.nodeName == "name")
+					{
+						if (xmlNode.childNodes.length > 0) {appName = xmlNode.childNodes[0].nodeValue;}
+					}		
+					if (xmlNode.nodeName == "versionNumber")
+					{
+						if (xmlNode.childNodes.length > 0) {appVersion = xmlNode.childNodes[0].nodeValue;}
+					}	
+				}	
+				
+				// Get the bucket name. It should be stored in the same directory
+				// as this file.
+				try
+				{
+					var config:File = File.applicationStorageDirectory.resolvePath("." + appName);
+					if (config.exists) 
+					{
+						var stream:FileStream = new FileStream();
+						stream.open(config, FileMode.READ);							
+						var settings:Object = stream.readObject();
+						bucket = settings.bucket;
+						stream.close();
+					}
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					bucket = "";
+				}
+
+				_appManager = new AppManager(this, appName, appVersion,  bucket);
+				
+				// Set the static references
+				ObjectHandles.appManager = _appManager;
+				VisualElementHandle.appManager = _appManager;
+			}			
+
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				// Check for a pending update
+				/*
+				_updater = new ApplicationUpdaterUI();
+				if (!_updater.isFirstRun)
+				{
+					_updater.updateURL = UPDATE_URL;	
+					_updater.isCheckForUpdateVisible = false;
+					_updater.addEventListener(UpdateEvent.INITIALIZED, updateInitHandler);
+					_updater.addEventListener(ErrorEvent.ERROR, updateErrorHandler);
+					_updater.initialize();
+				}
+				*/
+			}
+			
+			protected function this_addedToStageHandler(event:Event):void
+			{
+			}
+
+
+			protected function resizeHandler(event:ResizeEvent):void
+			{
+				if (_appManager != null) {_appManager.sendResizeEvent();}
+			}
+
+			protected function closingHandler(event:Event):void
+			{
+				if (storyboard.signedIn)
+				{
+					event.preventDefault();
+				
+					Alert.show("Do you want to exit the StratoScreen Storyboard?", "Exit Application", 
+					       	   Alert.YES | Alert.NO, null, closeHandler, null, Alert.NO);
+				}
+			}
+			
+			private function closeHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.YES) {NativeApplication.nativeApplication.exit();}				
+			}
+
+			
+			private function updateInitHandler(event:UpdateEvent):void
+			{
+				_updater.checkNow();
+			}
+
+			private function updateErrorHandler(ErrorEvent:Event):void
+			{
+				Alert.show("The update could not be completed. Please try again the next time you run the application", "Update Error")
+			}
+
+			
+		]]>
+	</fx:Script>
+	<view:Storyboard id="storyboard" x="0" y="0" width="100%" height="100%" />
+</s:WindowedApplication>

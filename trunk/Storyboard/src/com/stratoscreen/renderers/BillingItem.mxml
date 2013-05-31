@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" 
+				autoDrawBackground="true" minHeight="30" alternatingItemColors="[0xf0f0f0,0xffffff]">
+	
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.model.BillingRow;
+			
+			[Bindable] private var _billingRow:BillingRow;
+			
+			public override function set data(value:Object):void
+			{
+				super.data = value;
+				
+				_billingRow = value as BillingRow;	
+			}
+			
+			protected function imgDelete_clickHandler(event:MouseEvent):void
+			{
+				Object(this.owner).document.cancelSubscription(_billingRow);
+			}
+			
+		]]>
+	</fx:Script>
+	
+	<s:HGroup verticalCenter="0">
+		<s:Spacer />
+		<s:Label text="{_billingRow.screenCount} Screens" width="200" maxDisplayedLines="1"  />
+		<s:Image id="imgDelete" width="16" height="16" click="imgDelete_clickHandler(event)"
+				 source="@Embed('assets/icons/delete.png')" useHandCursor="true" buttonMode="true"  />
+		<s:Spacer />
+	</s:HGroup>
+	
+</s:ItemRenderer>

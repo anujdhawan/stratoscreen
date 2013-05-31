@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="178" height="64" title="Completing Setup"
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.S3Class;
+			import com.stratoscreen.aws.S3Event;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Identities;
+			import com.stratoscreen.resources.CrossDomainEmbed;
+			import com.stratoscreen.utils.LogUtils;
+			import com.stratoscreen.utils.SecurityUtils;
+			
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			private var _appManager:AppManager;
+			private var _success:Boolean = false;
+			private var _crossDomain:File;
+			private var _marker:File;
+			private var _signon:File;			
+			private var _bucket:String;
+			
+			public function get bucket():String
+			{
+				return _bucket;
+			}
+
+			public function set bucket(value:String):void
+			{
+				_bucket = value;
+			}
+
+			public function get success():Boolean
+			{
+				return _success;
+			}
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.closeButton.visible = false;
+				PopUpManager.centerPopUp(this);
+				
+				_appManager = this.parentApplication.appManager;
+				
+			
+				// Start a series of events. 
+				// If any of these fail. We have to start over
+				//
+				// 1. configure. Upload the CrossDomain file
+				// 2. crossDomainUploadHandler. Upload marker file
+				// 3. markerUploadHandler. Get the identity for the player
+				// 4. queryPlayerIdentityHandler. Create sign on package and upload
+				// 5. signonUploadHandler. Update database 
+				// 6. clean up and end
+				
+				configure();
+			}
+			
+			private function configure():void
+			{
+				try
+				{
+					// Create temporary files for configuring the bucket
+					_crossDomain = File.createTempFile();
+					var stream:FileStream = new FileStream();
+					stream.open(_crossDomain, FileMode.WRITE);
+					stream.writeUTFBytes(new CrossDomainEmbed().toString());
+					stream.close();
+					
+					// Upload the file
+					_appManager.s3.uploadFile(bucket, _crossDomain, "crossdomain.xml", crossDomainUploadHandler, S3Class.ACL_PUBLIC_READ);
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					closeHandler(null);
+				}
+			}
+			
+			private function crossDomainUploadHandler(event:S3Event):void
+			{
+				// Make sure we uploaded correctly
+				if (!event.success)
+				{
+					closeHandler();
+					return;					
+				}
+				
+				// Clean up old work files
+				try
+				{
+					_crossDomain.deleteFile();
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+				}
+				
+				// Create a marker in the bucket. This will help with identification
+				// Add the Main Account web bucket so the sub accounts can find the web bucket
+				try
+				{
+					_marker = File.createTempFile();
+					var stream:FileStream = new FileStream();
+					stream.open(_marker, FileMode.WRITE);
+					stream.writeUTFBytes("");	
+					stream.close();
+					
+					// Upload the marker
+					_appManager.s3.uploadFile(_bucket, _marker, Constants.BUCKET_MARKER, markerUploadHandler);
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					closeHandler(null);
+				}
+			}
+			
+			private function markerUploadHandler(event:S3Event):void
+			{
+				// Clean up old work files
+				try
+				{
+					_marker.deleteFile();
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+				}
+				
+				try
+				{
+					var sql:String = "Select * from Identities where type = '" + Constants.USER_TYPE_PLAYER + "'"
+					_appManager.sdb.select(sql,queryPlayerIdentityHandler,Identities) ;
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					closeHandler(null);
+				}
+			}
+			
+			private function queryPlayerIdentityHandler(event:SDBEvent):void
+			{
+				try
+				{
+					if (!event.success) {throw new Error(event.message);}
+					
+					var identity:Identities = event.result[0] as Identities;
+					
+					var DELIMETER:String = "\t";
+					
+					// Create the rows of the packages
+					var pkg:String = _appManager.regionId.toString() + DELIMETER;
+					pkg += identity.accessKey + DELIMETER;
+					pkg += identity.secretKey + DELIMETER;
+					pkg += SecurityUtils.simpleEncrypt(_appManager.currentAccount.itemName);
+					pkg = SecurityUtils.simpleEncrypt(pkg, SecurityUtils.INSTALL_KEY); 
+					
+					// Re-encrypt with the common key. 
+					// I hope this is all worth it!     
+					_signon = File.createTempFile();
+					var stream:FileStream = new FileStream();
+					stream.open(_signon, FileMode.WRITE);
+					stream.writeUTFBytes(pkg);
+					stream.close();
+					
+					// Upload the file
+					_appManager.s3.uploadFile(bucket, _signon, bucket, signonUploadHandler, S3Class.ACL_PUBLIC_READ);			
+
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					closeHandler(null);
+				}
+			}
+			
+			private function signonUploadHandler(event:S3Event):void
+			{
+				// Clean up old work files
+				try
+				{
+					_signon.deleteFile();
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+				}
+
+				_appManager.currentAccount.partial = "0";
+				_appManager.currentAccount.modifiedBy = _appManager.currentUser.itemName;
+				_appManager.currentAccount.modifiedDate = new Date();
+				_appManager.currentAccount.updated = true;				
+				_appManager.sdb.updateDomain([_appManager.currentAccount], updateAccountHandler);
+					
+				_success = true;
+				closeHandler(null);
+			}
+			
+			private function updateAccountHandler(event:SDBEvent):void
+			{
+				try
+				{
+					if (!event.success) {throw new Error(event.message);}
+
+					_success = true;
+					closeHandler(null);
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					closeHandler(null);
+				}
+			}
+			
+			
+			
+			protected function closeHandler(event:CloseEvent = null):void
+			{				
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+			
+		]]>
+	</fx:Script>
+	<s:Label x="10" y="10" text="Completing account setup."/>
+</s:TitleWindow>

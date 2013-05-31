@@ -1,0 +1,466 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="668" height="288" 
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)" title="Edit Media" xmlns:components="com.stratoscreen.components.*">
+	<s:layout>
+		<s:HorizontalLayout verticalAlign="middle"/>
+	</s:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.S3Event;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.controller.ForeignKeyControl;
+			import com.stratoscreen.controller.MediaControl;
+			import com.stratoscreen.events.ForeignKeyEvent;
+			import com.stratoscreen.events.UpdateMediaEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.ImageCacheManager;
+			import com.stratoscreen.model.domains.Medias;
+			import com.stratoscreen.resources.CloudFrontNode;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			[Bindable] private var _media:Medias;
+			[Bindable] private var _isDirty:Boolean = false;
+			private var _appManager:AppManager;
+			private var _naggedOnce:Boolean = false;
+			private var _xmlAcl:XMLDocument;
+			private var _allowStreaming:Boolean = false;			
+			private var _canceled:Boolean = true;	
+			private var _savedAcl:Boolean = false;
+			private var _savedData:Boolean = false;
+			private var _xmlFile:File = null;
+			
+			public function get canceled():Boolean
+			{
+				return _canceled;
+			}
+			
+			public function get media():Medias
+			{
+				_media.duration = groupDuration.duration.toString();
+				if (chkToEnd.selected) {_media.duration = "0";}
+				if (chkToFrame.selected) {_media.duration = "0";}
+				return _media;
+			}
+			
+			public function set media(value:Medias):void
+			{
+				_media 	= Utils.copyClassObject(Medias, value);
+				
+				if (chkToEnd == null) {return;}
+				groupDuration.duration = parseInt(_media.duration);
+				chkToEnd.selected = (groupDuration.duration <= 0);
+				groupDuration.enabled = !chkToEnd.selected; 
+				groupAccel.visible = false;
+				groupAccel.height = 0;
+				
+				// Images need a duration
+				vsOptions.selectedIndex = 0;
+				if (_media.mediaType == Constants.MEDIA_TYPE_IMAGE)
+				{
+					chkToEnd.enabled = false;
+					groupDuration.enabled = true;
+					if (groupDuration.duration <= 0) 
+					{
+						groupDuration.duration = parseInt(_appManager.currentAccount.defaultDuration);
+						_media.duration = _appManager.currentAccount.defaultDuration;
+					}
+				}			
+				
+				// SWFs may want to play to a frame number
+				if (_media.mediaType == Constants.MEDIA_TYPE_SWF)
+				{
+					vsOptions.selectedIndex = 1;				
+					
+					var frames:int = parseInt(_media.frames);
+					txtFrame.text = frames.toString();
+					chkToFrame.selected = (frames > 0);
+					groupDuration.enabled = !chkToFrame.selected;		
+					
+					// Commented out until Adobe fixes play back bug
+					/*
+					groupAccel.visible = true;
+					groupAccel.height = 20;
+					chkAccel.selected = _media.accelerated == "1";
+					*/
+				}
+				
+				// Allow the media to be streamed if this Video or Audio
+				// AND... the account allows it
+				// AND... the media is uploaded. We cannot set the ACL until it exists on AWS
+				if (_appManager.currentAccount.streaming == "1" && _media.uploaded)
+				{
+					if (_media.mediaType == Constants.MEDIA_TYPE_VIDEO || _media.mediaType == Constants.MEDIA_TYPE_AUDIO)
+					{
+						_allowStreaming = true;
+						chkStream.selected = _media.canStream == "1";
+						
+						// Get the ACL for this Object. We may need to change it
+						_appManager.s3.getFileACL(_appManager.currentAccount.bucket, _media.itemName, aclHandler);
+					}
+				}			
+				groupStream.visible = _allowStreaming;
+				
+			}
+			
+			private function aclHandler(event:S3Event):void
+			{				
+				try
+				{
+					_xmlAcl = new XMLDocument(event.result.toString());
+				}
+				catch (err:Error)
+				{
+					_xmlAcl = null;
+					Alert.show("Could not load the ACL for this media. Configuring the media for streaming will not be possible. Please try again", "Load Error");
+				}			
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				groupDuration.addEventListener(Duration.DURATION_CHANGE, durationChangeHandler);
+				previewPlayer.addEventListener(MediaPlayer.THUMB_CHANGE, thumbChangeHandler);
+				btnLock.addEventListener(LockButton.CLICKED, btnLockClickHandler);
+				PopUpManager.centerPopUp(this);				
+				
+				this.media = _media;				
+			}
+			
+			private function durationChangeHandler(event:Event):void
+			{
+				_isDirty = true;
+			}
+			
+			private function thumbChangeHandler(event:Event):void
+			{
+				_isDirty = true;
+				_media.updated = true;
+				_media.refresh = true;	// Force the parent to do the actual save
+			}
+			
+			private function  btnLockClickHandler(event:Event):void
+			{
+				if (btnLock.selected && !_naggedOnce)
+				{
+					var msg:String;
+					if (_media.mediaType == Constants.MEDIA_TYPE_AUDIO)
+					{
+						msg = "Audio does not use dimensions field. It is only used to size the media thumbnail.\r\n" + 
+							"Do you want to continue?";						
+					}
+					else
+					{
+						msg = "Warning. Changing the dimensions may affect the playback of the media.\r\n" + 
+							"Do you want to continue?\r\n" + 
+							"Please note the change will not affect the existing instances of the media " + 
+							"used in Groups, Overlays or Channels."
+					}
+					Alert.show(msg, "Change Dimensions", Alert.YES | Alert.NO, null, answerHandler, null, Alert.YES);
+					_naggedOnce = true;
+				}
+			}
+			
+			private function answerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.NO) {btnLock.selected = false;}
+			}
+			
+			protected function closeHandler(event:Event):void
+			{
+				var closeWindow:Boolean;
+				
+				if (event == null)
+				{
+					// This was called directly from the program
+					closeWindow = true;
+					
+					// Broadcast a new event. The parent will be listening
+					if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE, false, false, Alert.YES));}
+				}
+				else  
+				{
+					switch (CloseEvent(event).detail)
+					{
+						case Alert.NO:
+							closeWindow = false;
+							break;
+						
+						case Alert.YES:
+							closeWindow = true;
+							break;
+						
+						default:
+							closeWindow = !_isDirty
+							if (_isDirty) {Alert.show("Do you want to close window?", "Close Window", Alert.YES | Alert.NO, null, closeHandler, null, Alert.NO);}
+					}
+				}
+				
+				if (closeWindow) {PopUpManager.removePopUp(this);}				
+			}
+			
+			
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				_canceled = false;
+				_media.canStream = chkStream.selected ? "1" : "0";
+				_media.accelerated = chkAccel.selected ? "1" : "0";
+				_media.updated = true;
+				_media.duration = groupDuration.duration.toString();
+				_media.modifiedDate = new Date();
+				_media.modifiedBy = this.parentApplication.appManager.currentUser.itemName;
+				
+				// Check for valid times
+				if (_media.mimeType.indexOf("image") >= 0)
+				{
+					if (groupDuration.duration <= 0) 
+					{
+						groupDuration.errorString = "Images must have a duration";
+						return;
+					}
+				}
+
+				this.enabled = false;
+				_savedAcl = true;	// Assume we are not saving this. 
+
+				// Update the ACL for this object if needed
+				if (chkStream.selected)
+				{
+					if (_xmlAcl == null)
+					{
+						Alert.show("The object ACL was not loaded. Cannot save for streaming", "Load Error");
+						return;
+					}
+					
+					// Get the AccessControlList node
+					// Look for the 
+					var isAclSet:Boolean = false;
+					var node:XMLNode = _xmlAcl.lastChild.childNodes[1];
+					for each (var grantNode:XMLNode in node.childNodes)
+					{
+						var id:String = grantNode.firstChild.firstChild.firstChild.nodeValue;
+						if (id ==_appManager.settings.s3CanonicalUserId)
+						{
+							isAclSet = true;
+							break;
+						}
+					}
+					_savedAcl = isAclSet;	// When saving we may have two parallel processes
+					
+					// Update the ACL XML to include the CloudFront Orgin 
+					if (!isAclSet)
+					{
+						node.appendChild(createAclNode("READ"));
+						
+						// Save the XML to a temp file so we can change the ACL 
+						_xmlFile = File.createTempFile();
+						var stream:FileStream = new FileStream();
+						stream.open(_xmlFile, FileMode.WRITE);
+						stream.writeUTFBytes(_xmlAcl.toString());
+						stream.close();	
+						
+						_appManager.s3.putObjectACL(_appManager.currentAccount.bucket, _media.itemName, _xmlFile, updateAclHandler);
+					}
+				}
+				
+				// The user overrode the snapshot
+				if (previewPlayer.thumbBmpData != null)
+				{
+					if (_media.thumbBmpData != previewPlayer.thumbBmpData)
+					{
+						_media.thumbBmpData = previewPlayer.thumbBmpData;
+						_media.refresh = true;							
+					}
+				}
+				
+				// Delete the cached thumbnail for this image. 
+				var thumbUrl:String = "https://" + AWSRegions.getAWSEndpoint(_appManager.regionId).s3;
+				thumbUrl += "/" + _appManager.currentAccount.bucket;					
+				thumbUrl += "/" + Constants.THUMB_PREFIX + _media.itemName + Constants.THUMB_EXTENSION; ;
+				ImageCacheManager.getInstance().deleteImageByURL(thumbUrl);						
+				
+				// If we are only updating data do it now
+				if (_media.file == null && !_media.refresh)
+				{
+					lblStatus.text = "Updating media";
+					_appManager.sdb.updateDomain([_media], updateMediaHandler);
+					return;
+				}
+				
+				_savedData = true;	// Skip the saving of data. The media has changed. It will be saved by the NavMediaMedia 
+				closeAfterSave();	
+			}
+			
+			private function updateMediaHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not update media. Please try again later", "Update Error");
+					this.enabled = true;
+					return;
+				}
+				
+				_media.updated = false;
+				_savedData = true;
+								
+				closeAfterSave();	
+			}
+			
+			private function updateAclHandler(event:S3Event):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not update media ACL. Pleae try again later", "ACL Error");
+					this.enabled = true;
+					return;
+				}
+				
+				if (_xmlFile != null) {_xmlFile.deleteFile();}
+				_savedAcl = true;
+				closeAfterSave();	
+			}
+			
+			private function closeAfterSave():void
+			{
+				if (!_savedData || !_savedAcl) {return;}
+				closeHandler(null);
+			}			
+			
+			protected function chkToEnd_changeHandler(event:Event):void
+			{
+				_isDirty = true;
+				groupDuration.enabled = !chkToEnd.selected;
+			}
+			
+			
+			protected function chkToFrame_changeHandler(event:Event):void
+			{
+				_isDirty = true;
+				groupDuration.enabled = !chkToFrame.selected;
+			}
+			
+			
+			protected function btnReplace_clickHandler(event:MouseEvent):void
+			{
+				this.enabled = false;
+				
+				// Check for foreign keys
+				var control:ForeignKeyControl = new ForeignKeyControl(_appManager);
+				control.checkMedia(_media.itemName, foreignKeyHandler);
+			}
+			
+			private function foreignKeyHandler(event:ForeignKeyEvent):void
+			{				
+				this.enabled = true;
+				if (event.conflictFound)
+				{
+					var msg:String = "Warning. " + _media.name + " is is being used in the ";
+					msg += event.displayName + " table. Replacing the media may affect the duration and dimensions.\r\n";
+					msg += "Do you want to continue?" 
+					Alert.show(msg, "Media Replace", Alert.YES | Alert.NO, null, replaceAnswerHandler, null, Alert.YES);
+				}
+				else
+				{
+					replaceAnswerHandler(null);
+				}
+			}
+			
+			private function replaceAnswerHandler(event:CloseEvent):void
+			{
+				if (event != null)
+				{
+					if (event.detail == Alert.NO) {return;}
+				}
+				
+				// Reuse the file filters from the media navigator
+				var storyboard:Storyboard = this.parentApplication.storyboard;
+				var filters:Array = storyboard.navMedia.navMediaMedia.fileFilters;				
+				
+				var file:File = new File();
+				file.addEventListener(Event.SELECT, fileSelectHandler);				
+				file.browse();				
+			}
+			
+			private function fileSelectHandler(event:Event):void
+			{
+				_isDirty = true;
+				event.target.removeEventListener(Event.SELECT, fileSelectHandler);
+				_media.file = event.target as File;
+				_media.updated = true;
+				_media.modifiedMediaDate = new Date();
+			}
+			
+			private function createAclNode(access:String):XMLNode
+			{
+				var patternOrgin:RegExp = /\@@ORGINID@@/gi;
+				var patternAccess:RegExp = /\@@ACCESS@@/gi;
+				
+				var nodeString:String = (new CloudFrontNode()).toString();
+				nodeString = nodeString.replace(new RegExp(/\t/gi), "");	// Clean up the extra characters
+				nodeString = nodeString.replace(new RegExp(/\n/gi), "");	// Clean up the extra characters
+				nodeString = nodeString.replace(new RegExp(/\r/gi), "");	// Clean up the extra characters
+				nodeString = nodeString.replace(patternOrgin, _appManager.settings.s3CanonicalUserId);
+				nodeString = nodeString.replace(patternAccess, access);
+				
+				var doc:XMLDocument = new XMLDocument(nodeString);
+				
+				return doc.firstChild;
+			}
+		]]>
+	</fx:Script>
+	<s:controlBarContent>
+		<s:Label id="lblStatus" height="12" styleName="Status"/>
+	</s:controlBarContent>
+	<mx:Spacer width="0" />
+	<components:MediaPlayer id="previewPlayer" x="10" y="10" width="309" height="193" 
+							media="{_media}" allowThumbOverride="true" viewMode="L" />
+	<s:Line rotation="90" height="90%" >
+		<s:stroke>
+			<s:SolidColorStroke color="#3E63C1" weight="1" />
+		</s:stroke>				
+	</s:Line>
+	<s:Group width="100%" height="100%">
+		<s:Label x="5" y="10" text="Name" height="20" fontWeight="bold"/>
+		<s:TextInput x="110" y="10" width="220" id="txtName" text="@{_media.name}" change="{_isDirty = true;}"/>		
+		<s:Label x="5" y="38" text="Duration" height="32" fontWeight="bold"/>
+		<components:Duration id="groupDuration" x="110" y="38" click="{_isDirty = true}"/>
+		<mx:ViewStack id="vsOptions" x="109" y="68" width="100%" height="22" creationPolicy="all">
+			<s:NavigatorContent label="View 1" width="100%" height="100%">
+				<s:CheckBox x="0" y="2" label="Play to end" id="chkToEnd" change="chkToEnd_changeHandler(event)"/>
+			</s:NavigatorContent>
+			<s:NavigatorContent>
+				<s:CheckBox x="0" y="2" label="Play to Frame" id="chkToFrame" enabled="{!chkAccel.selected}" change="chkToFrame_changeHandler(event)"/>
+				<s:TextInput id="txtFrame" text="@{_media.frames}" x="117" y="2" restrict="0-9" width="64" enabled="{chkToFrame.selected}" change="{_isDirty = true;}"/>
+			</s:NavigatorContent>
+		</mx:ViewStack>				
+		<s:TextInput x="110" y="96" width="38" maxChars="4" id="txtWidth" text="@{_media.width}" change="{_isDirty = true;}" enabled="{btnLock.selected}"/>
+		<s:Label x="5" y="96" text="Dimensions" height="20" fontWeight="bold"/>
+		<s:Label x="155" y="96" text="x" height="20" fontWeight="bold" fontSize="14"/>
+		<s:TextInput x="170" y="96" width="38" maxChars="4" id="txtHeight" text="@{_media.height}" change="{_isDirty = true;}"  enabled="{btnLock.selected}"/>
+		<components:LockButton x="216" y="96" id="btnLock" />
+		<s:VGroup x="5" y="124" gap="0">
+			<s:HGroup id="groupAccel" gap="0">
+				<s:Label width="105" text="Accelerated" toolTip="Hardware accelerated" height="20" fontWeight="bold"/>
+				<s:CheckBox id="chkAccel"  click="{_isDirty = true;}"/>
+			</s:HGroup>			
+			<s:HGroup id="groupStream" gap="0">
+				<s:Label width="105" text="Enable Streaming" height="20" fontWeight="bold"/>
+				<s:CheckBox id="chkStream"  click="{_isDirty = true;}"/>
+			</s:HGroup>			
+			<mx:Spacer height="{groupStream.visible ? 6 : 0}" />
+			<s:HGroup gap="0">
+				<s:Label width="105" text="Replace media" height="20" fontWeight="bold"/>
+				<s:Button label="Select..." id="btnReplace" click="btnReplace_clickHandler(event)"/>
+			</s:HGroup>			
+		</s:VGroup>
+		
+		<s:Button label="Save" id="btnSave" click="btnSave_clickHandler(event)" right="10" bottom="10" enabled="{_isDirty}"/>
+	</s:Group>
+</s:TitleWindow>

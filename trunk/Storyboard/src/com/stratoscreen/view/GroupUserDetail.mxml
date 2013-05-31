@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx"  xmlns:components="com.stratoscreen.components.*"
+		 height="135" contentBackgroundAlpha="0.0"	 creationComplete="creationCompleteHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Users;
+			
+			import mx.events.FlexEvent;
+			import mx.formatters.DateFormatter;
+			
+			public static const DETAIL_CLOSE:String = "DETAIL_CLOSE";
+			public static const USER_DELETE:String = "USER_DELETE";
+			public static const USER_EDIT:String = "USER_EDIT";
+			public static const USER_EMAIL_VERIFY:String = "USER_EMAIL_VERIFY";
+			
+			[Bindable][Embed(source="/assets/icons/cross.png")]
+			private var iconClose:Class;
+
+			[Bindable] private var _user:Users;
+			[Bindable] private var _canEdit:Boolean;
+			private var _appManager:AppManager;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+			
+			public function get user():Users
+			{
+				return _user;
+			}
+			
+			public function set user(value:Users):void
+			{
+				_user = value;
+				if (_user == null) {return;}
+				if (groupMain == null) {return;}	//still renedering
+				
+				var formatter:DateFormatter = new DateFormatter();
+				formatter.formatString = "MMM D, YYYY";
+				lblCreated.text = formatter.format(_user.createdDate);					
+				lblModified.text = formatter.format(_user.modifiedDate);
+				lblUserType.text = user.type == Constants.USER_TYPE_MANAGER ? "Manager" : "User";
+				lblStatus.text = user.status == Users.STATUS_DISABLED ? "Disabled" : "Active";
+				
+				// Find the user who owns this item
+				lblCreatedBy.text = "";
+				lblModifiedBy.text = "";
+				
+				for (var i:int = 0; i < _appManager.usersHdrs.length; i++)
+				{
+					if (_appManager.usersHdrs[i].itemName == _user.createdBy)
+					{
+						lblCreatedBy.text = _appManager.usersHdrs[i].firstName + " " + 
+							_appManager.usersHdrs[i].lastName;
+					}
+					
+					if (_appManager.usersHdrs[i].itemName == _user.modifiedBy)
+					{
+						lblModifiedBy.text = _appManager.usersHdrs[i].firstName + " " + 
+							_appManager.usersHdrs[i].lastName;
+					}
+				}	
+				
+				// We may have users created by the main admin
+				if (lblCreatedBy.text == "") {lblCreatedBy.text = "Administrator";}
+				if (lblModifiedBy.text == "") {lblModifiedBy.text = "Administrator";}
+				
+				// Do not allow the user to delete themselves
+				_canEdit = user.itemName !=  _appManager.currentUser.itemName
+			}
+			
+			protected function btnClose_clickHandler(event:MouseEvent):void
+			{
+				this.dispatchEvent(new Event(DETAIL_CLOSE));
+			}
+			
+			protected function linkEdit_clickHandler(event:MouseEvent):void
+			{
+				this.dispatchEvent(new Event(USER_EDIT));
+			}
+			
+			protected function linkDelete_clickHandler(event:MouseEvent):void
+			{
+				this.dispatchEvent(new Event(USER_DELETE));
+			}
+			
+			protected function linkVerify_clickHandler(event:MouseEvent):void
+			{
+				this.dispatchEvent(new Event(USER_EMAIL_VERIFY));
+				
+			}
+			
+		]]>
+	</fx:Script>
+	<s:BorderContainer styleName="DetailBand" left="1" top="1" right="1" bottom="1" >
+		<s:HGroup id="groupMain" width="100%" height="100%" verticalAlign="middle">
+			<mx:Spacer width="0" />
+			<s:Group height="100%" >
+				<s:Label x="0" y="10" text="Name" fontWeight="bold"/>
+				<s:Label x="75" y="10" text="{_user.firstName + ' ' + _user.lastName}" />
+				<s:Label x="0" y="32" text="Email" fontWeight="bold"/>
+				<s:Label x="75" y="32" text="{_user.email}" />
+				<s:Label x="0" y="54" text="Type" fontWeight="bold"/>
+				<s:Label id="lblUserType" x="75" y="54"   text=" "/>
+				<s:Label x="0" y="76" text="Status" fontWeight="bold" />
+				<s:Label id="lblStatus" x="75" y="76"   text=" "/>
+			</s:Group>
+			<mx:Spacer width="10" />
+			<s:Group height="100%" >
+				<s:Label x="0" y="10" text="Created" fontWeight="bold"/>
+				<s:Label x="75" y="10" text=" " id="lblCreated"/>
+				<s:Label x="0" y="32" text="Created by" fontWeight="bold"/>
+				<s:Label x="75" y="32" text=" " id="lblCreatedBy"/>
+				<s:Label x="0" y="54" text="Modified" fontWeight="bold"/>
+				<s:Label x="75" y="54" text=" " id="lblModified"/>
+				<s:Label x="0" y="76" text="Modified by" fontWeight="bold"/>
+				<s:Label x="75" y="76" text=" " id="lblModifiedBy"/>
+			</s:Group>		
+			<mx:Spacer width="100%" />
+			<s:VGroup height="100%" maxWidth="140" paddingBottom="2" paddingLeft="2" paddingRight="2" paddingTop="2" textAlign="right">				
+				<s:HGroup width="100%">
+					<mx:Spacer width="100%" />
+					<components:IconButton id="btnClose" click="btnClose_clickHandler(event)" icon="{iconClose}" />
+				</s:HGroup>
+				<mx:Spacer height="100%" />
+				<mx:LinkButton id="linkVerify" width="100%" label="Send verfication"
+							   click="linkVerify_clickHandler(event)"
+							   icon="@Embed(source='/assets/icons/email_add.png')"/>
+				<mx:LinkButton label="Edit User" id="linkEdit" icon="@Embed(source='/assets/icons/pencil.png')" width="100%" 
+							   click="linkEdit_clickHandler(event)" enabled="{_canEdit}"/>
+				<mx:LinkButton label="Delete User" id="linkDelete" icon="@Embed(source='/assets/icons/delete.png')" width="100%" 
+							   click="linkDelete_clickHandler(event)" enabled="{_canEdit}"/>
+			</s:VGroup>
+		</s:HGroup>
+	</s:BorderContainer>	
+</s:Group>

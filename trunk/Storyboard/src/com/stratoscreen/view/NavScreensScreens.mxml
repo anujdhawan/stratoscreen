@@ -1,0 +1,448 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%"
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)" xmlns:view="com.stratoscreen.view.*" xmlns:components="com.stratoscreen.components.*" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.S3Event;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.controller.ScreenControl;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.*;			
+			import com.stratoscreen.model.views.*;
+			import com.stratoscreen.renderers.ScheduleDetailItem;
+			import com.stratoscreen.renderers.ScreenItem;
+			import com.stratoscreen.utils.LogUtils;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+
+			private static const DETAIL_HEIGHT:int = 120;
+			private static const DETAIL_WIDTH:int = 175;
+			private static const REPORTS_HEIGHT:int = 55;
+			private static const DOWNLOAD_HEIGHT:int = 55;
+			
+			private var _appManager:AppManager;
+			[Bindable] private var _screens:ArrayCollection;
+			[Bindable] private var _scheduleDetails:ArrayCollection = null;
+			private var _currentScreen:Screens;
+			private var _deleteScreen:Screens;
+			private var _shown:Boolean = false;
+			private var _winEdit:WinScreenEdit;
+			private var _winLineUpEdit:WinScheduleEdit;
+			private var _lastScreenItem:ScreenItem;
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				swfLoadingSchedule.visible = false;							
+				lblNoSchedule.visible = false;
+				
+				if (!_shown) {showHandler(null);}
+			}
+
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (!_shown)
+				{
+					btnAdd.enabled = _appManager.currentUser.type == Constants.USER_TYPE_MANAGER;
+					screenDetail.addEventListener(GroupScreenDetail.DETAIL_CLOSE, detailCloseHandler);
+					screenDetail.addEventListener(GroupScreenDetail.SCREEN_DELETE, deleteScreenHandler);
+					screenDetail.addEventListener(GroupScreenDetail.SCREEN_EDIT, editScreenHandler);
+					hideDetail();
+					loadScreens();
+					_shown = true;
+				}
+			}
+
+			public function refresh():void
+			{
+				hideDetail();
+				loadScreens();
+			}
+
+			
+			private function loadScreens():void
+			{				
+				this.parentDocument.enabled = false;
+				
+				var control:ScreenControl = new ScreenControl(_appManager);
+				control.addEventListener(ScreenControl.QUERY_COMPLETE, queryScreensHandler);
+				control.addEventListener(ScreenControl.QUERY_ERROR, queryScreensHandler);
+				control.queryAndUpdateScreens();
+			}
+			
+			private function queryScreensHandler(event:Event):void
+			{		
+				this.parentDocument.enabled = true;
+				var control:ScreenControl = event.target as ScreenControl;
+				control.removeEventListener(ScreenControl.QUERY_COMPLETE, queryScreensHandler);
+				control.removeEventListener(ScreenControl.QUERY_ERROR, queryScreensHandler);
+
+				if (!control.success)
+				{
+					Alert.show("Could not load Screens. Please try again later", "Load Error");
+					return;
+				}				
+
+				_screens = control.screens;
+				
+				// Pass a reference to the parent. We will search from there
+				this.parentDocument.childData = _screens;	
+				
+				// Refresh the detail too
+				if (screenDetail.visible)
+				{
+					// Find the matching screen and reset
+					for each (var scrn:Screens in _screens)
+					{
+						if (screenDetail.screen_.itemName == scrn.itemName)
+						{
+							screenDetail.screen_ = scrn;
+							break;
+						}
+					}
+				}
+			}
+			
+			private function hideDetail():void
+			{
+				screenDetail.height = 0;
+				screenDetail.visible = false;	
+				screenDetailExtra.width = 0;
+				screenDetailExtra.visible = false;
+			}
+			
+			private function detailCloseHandler(event:Event):void
+			{
+				hideDetail();
+			}
+			
+			private function groupCloseHandler(event:Event):void
+			{
+				hideDetail();				
+				
+				// Reload if there was an update
+				if (!event.target.canceled) {loadScreens();}
+			}
+			
+			protected function btnAdd_clickHandler(event:MouseEvent):void
+			{
+				// Show an error message if too many are created
+				if (_screens.length >= (_appManager.currentAccount.licenseCountInt + _appManager.currentAccount.paidLicenseCount))
+				{
+					Alert.show("You do not have event licenses to link another screen. Please contact your account administrator.", "");
+				}
+				else
+				{				
+					editScreenHandler(null);
+					hideDetail();
+				}
+			}
+			
+			public function itemClick(item:ScreenItem, refresh:Boolean = false):void
+			{
+				// Keep the redraw if we are re-clicked the same item
+				if (!refresh)
+				{
+					if (_currentScreen != null && screenDetail.visible && item.data.itemName == _currentScreen.itemName) {return;}
+				}
+
+				_lastScreenItem = item;
+				_currentScreen = item.data as Screens;
+				screenDetail.height = DETAIL_HEIGHT;
+				screenDetail.visible = true;
+				screenDetail.screen_ = _currentScreen;
+				
+				screenDetailExtra.width = DETAIL_WIDTH;
+				screenDetailExtra.visible = true;
+								
+				swfLoadingSchedule.visible = true;
+				lblNoSchedule.visible = false;
+				btnSchedule.visible = false;
+				
+				// Turn off reporting for now
+				borderReports.visible = false;  //_currentScreen.device != Screens.DEVICE_STAND_ALONE;
+				borderReports.height = borderReports.visible ? REPORTS_HEIGHT : 0;
+				borderDownload.visible = _currentScreen.device == Screens.DEVICE_STAND_ALONE;
+				borderDownload.height = borderDownload.visible ? DOWNLOAD_HEIGHT : 0;
+								
+				// We need the channels too for Schedule Item Renderer
+				// Remember... The Schedule ID is the same as the SCreen ID
+				var sql:String = "Select * from ScheduleDetail where scheduleId='";
+				sql += _currentScreen.itemName + "' and priority is not null ";
+				sql += " order by priority";	 
+				_appManager.sdb.select(sql, loadScheduleDetailHandler, ScheduleDetail);
+				if (_scheduleDetails != null) {_scheduleDetails.removeAll();}				
+			}
+			
+			private function loadScheduleDetailHandler(event:SDBEvent):void
+			{
+				swfLoadingSchedule.visible = false;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not load the schedule. Please try again later.", "Query Error");
+					_scheduleDetails = null;
+					return;
+				}
+				
+				_scheduleDetails = new ArrayCollection();
+				_scheduleDetails.source = event.result as Array;
+				
+				lblNoSchedule.visible = _scheduleDetails.length <= 0;
+				btnSchedule.visible = true;
+			}
+			
+			private function listObjectsHandler(event:S3Event):void
+			{
+				if (event.success)
+				{
+					
+				}				
+			}
+			
+			private function editScreenHandler(event:Event):void
+			{
+				_winEdit = new WinScreenEdit();
+				_winEdit.addEventListener(CloseEvent.CLOSE, winEditCloseHandler);
+				_winEdit.screen_ = (event == null) ? null : event.target.screen_;
+				
+				// Save the reference to the window. The item renderer will need it
+				_appManager.currentEditWindow = _winEdit;
+				PopUpManager.addPopUp(_winEdit, this.parentApplication as DisplayObject, true);
+			}
+			
+			private function winEditCloseHandler(event:Event):void
+			{
+				_appManager.currentEditWindow = null;
+				hideDetail();				
+				
+				// Reload if there was an update
+				if (!event.target.canceled) {loadScreens();}
+			}		
+			
+			private function editScheduleHandler(event:Event):void
+			{
+				_winLineUpEdit = new WinScheduleEdit();
+				_winLineUpEdit.screen_ = _currentScreen;
+				_winLineUpEdit.width = this.parentApplication.width * Constants.EDIT_WINDOW_SIZE;
+				_winLineUpEdit.height = this.parentApplication.height * Constants.EDIT_WINDOW_SIZE;
+				_winLineUpEdit.addEventListener(CloseEvent.CLOSE, winLineUpCloseHandler);
+				
+				// Save the reference to the window. The item renderer will need it
+				_appManager.currentEditWindow = _winLineUpEdit;
+				PopUpManager.addPopUp(_winLineUpEdit, this.parentApplication as DisplayObject, true);
+			}					
+			
+			private function winLineUpCloseHandler(event:Event):void
+			{
+				_appManager.currentEditWindow = null;
+				itemClick(_lastScreenItem, true); // Reuse the click event to refresh the screen				
+			}
+			
+			private function deleteScreenHandler(event:Event):void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				_deleteScreen = event.target.screen_;
+				
+				Alert.show("Do you want to " + _deleteScreen.name + "?", "Delete Screen", Alert.YES | Alert.NO,
+					null, deleteAnswerHandler, null, Alert.NO); 
+			}
+			
+			private function deleteAnswerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.NO) {return;}
+				
+				this.parentDocument.enabled = false;
+				hideDetail();
+				_deleteScreen.deleted = true;
+				_appManager.sdb.updateDomain([_deleteScreen], deleteScreenDataHandler);
+			}
+			
+			private function deleteScreenDataHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					this.parentDocument.enabled = true;
+					Alert.show("Could not delete " + _deleteScreen.name + ". Please try again later.", "Error Delete");
+					return;
+				}
+				
+				// Delete the detail. In the case of a group there will be multiples
+				var sql:String = "Select * from ScreenDetail where screenId='" + _deleteScreen.itemName + "'";
+				_appManager.sdb.select(sql, queryDetailForDeleteHandler, ScreenDetail);
+			}
+			
+			private function queryDetailForDeleteHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					this.parentDocument.enabled = true;
+					Alert.show("Could not delete detail for " + _deleteScreen.name + ". The data will have to manually deleted.", "Error Delete");
+					return;
+				}
+				
+				// Loop through the detail and mark it for delete
+				var detail:Array = event.result as Array;
+				for (var i:int = 0; i < detail.length; i++)
+				{
+					detail[i].deleted = true;
+				}
+					
+				_appManager.sdb.updateDomain(detail, deleteScreenDetailHandler);
+			}
+			
+			private function deleteScreenDetailHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not delete detail for " + _deleteScreen.name + ". The data will have to manually deleted.", "Error Delete");
+					this.parentDocument.enabled = true;
+					return;
+				}	
+				
+				// Delete the LineUps
+				// Note. Screens and TVs are one to one. The schedules will have the same ID (itemname) as the Screen. 
+				var schedule:Schedules = new Schedules();
+				schedule.itemName = _deleteScreen.itemName;
+				schedule.deleted = true;
+				schedule.updated = false;
+				_appManager.sdb.updateDomain([schedule], deleteScheduleHandler);
+			}
+			
+			private function deleteScheduleHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not delete Schedule. The data will have to manually deleted.", "Error Delete");
+					this.parentDocument.enabled = true;
+					return;
+				}	
+				
+				// Query the detail so we can delete that too
+				var sql:String = "Select * from ScheduleDetail where scheduleId='" + _deleteScreen.itemName + "'";
+				_appManager.sdb.select(sql, queryLineUpDetailHandler, ScheduleDetail);
+			}
+			
+			private function queryLineUpDetailHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not query schedule detail. The data will have to manually deleted.", "Error Delete");
+					return;
+				}	
+				
+				// If the length is Zero, there was not a line up create
+				var detail:Array = event.result as Array;
+				if (detail.length == 0)
+				{
+					_deleteScreen = null;
+					loadScreens();
+					return;
+				}
+				
+				// Mark all the rows for delete				
+				for (var i:int = 0; i < detail.length; i++)
+				{
+					detail[i].deleted = true;	
+				}
+				
+				_appManager.sdb.updateDomain(detail, deleteLineupDetailHandler);
+			}
+			
+			private function deleteLineupDetailHandler(event:SDBEvent):void
+			{
+				this.parentDocument.enabled = true;
+
+				if (!event.success)
+				{
+					Alert.show("Could not delete schedule detail. The data will have to manually deleted.", "Error Delete");
+					return;
+				}	
+				
+				_deleteScreen = null;
+				loadScreens();
+			}	
+			
+			private function btnDownload_clickHandler(event:Event):void
+			{
+				
+			}
+
+
+			protected function btnReports_clickHandler(event:MouseEvent):void
+			{
+				var winReports:WinScreenReports = new WinScreenReports();
+				winReports.width = this.parentApplication.width * Constants.EDIT_WINDOW_SIZE;
+				winReports.height = this.parentApplication.height * Constants.EDIT_WINDOW_SIZE;
+				winReports.screenId = _currentScreen.itemName;
+				winReports._screens = _screens;
+				
+				PopUpManager.addPopUp(winReports, this.parentApplication as DisplayObject, true);
+			}
+
+		]]>
+	</fx:Script>
+	<s:VGroup x="0" y="0" width="100%" height="100%" paddingLeft="10" paddingRight="10" paddingTop="10" paddingBottom="10">
+		<s:HGroup height="100%" width="100%">
+			<s:BorderContainer  width="100%" height="100%">
+				<s:List x="11" y="5" height="100%" width="100%" itemRenderer=" com.stratoscreen.renderers.ScreenItem" dataProvider="{_screens}" borderVisible="false">
+					<s:layout>
+						<s:TileLayout orientation="rows"/>
+					</s:layout>			
+				</s:List>
+				<mx:SWFLoader id="swfLoadingMain" horizontalCenter="0" verticalCenter="0" width="25%" height="25%" 
+							  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true" visible="{!this.parentDocument.enabled}"/>			
+			</s:BorderContainer>
+			
+			<s:VGroup id="screenDetailExtra"  height="100%" width="155" gap="0">
+				<s:BorderContainer height="100%" width="100%" id="borderSchedule" >
+					<s:Label text="Screen Schedule" fontWeight="bold" y="5" id="lblSchedule" maxDisplayedLines="1" left="5" right="5"/>
+					<s:VGroup id="groupList" left="5" top="20" right="0" bottom="10">
+						<s:List id="listSchedules" itemRenderer="com.stratoscreen.renderers.ScheduleDetailItem" dataProvider="{_scheduleDetails}" 
+								 borderVisible="false" minHeight="15"  maxHeight="{groupList.height - 30}" >
+							<s:layout>
+								<s:TileLayout orientation="rows" horizontalAlign="left" requestedColumnCount="1"/>
+							</s:layout>	
+						</s:List>		
+						<s:HGroup width="100%" gap="0">
+							<mx:Spacer width="100%" />
+							<components:IconButton label="Edit Schedule" id="btnSchedule" icon="@Embed(source='/assets/icons/calendar.png')"  
+												   click="editScheduleHandler(event)"/>	
+							<mx:Spacer width="17" />
+						</s:HGroup>
+					</s:VGroup>
+					<s:Label id="lblNoSchedule" text="No schedule applied" top="20" width="100%" left="5"/>
+					<mx:SWFLoader id="swfLoadingSchedule" horizontalCenter="0" width="75" smoothBitmapContent="true" 
+								  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true" maintainAspectRatio="false" scaleContent="true" height="75" verticalCenter="0"/>
+				</s:BorderContainer>
+				
+				<mx:Spacer height="{borderReports.visible ? 6 : 0}" />
+				<s:BorderContainer height="55" width="100%" id="borderReports" >
+					<s:Label text="View Screen Reports" fontWeight="bold" y="5" maxDisplayedLines="1" left="5" right="5"/>
+					<components:IconButton label="Reports" id="btnReports" icon="@Embed(source='/assets/icons/report.png')"
+										    click="btnReports_clickHandler(event)"  right="5" bottom="5"/>	
+				</s:BorderContainer>					
+
+				<mx:Spacer height="{borderDownload.visible ? 6 : 0}" />
+				<s:BorderContainer height="55" width="100%" id="borderDownload" >
+					<s:Label text="Download Screen" fontWeight="bold" y="5" maxDisplayedLines="1" left="5" right="5"/>
+					<components:IconButton label="Download" id="btnDownload" icon="@Embed(source='/assets/icons/usb_flash_drive_plus.png')"
+										   click="btnDownload_clickHandler(event)"  right="5" bottom="5"/>	
+				</s:BorderContainer>					
+
+			</s:VGroup>
+		</s:HGroup>
+		<view:GroupScreenDetail id="screenDetail" width="100%" />
+		<s:HGroup width="100%">
+			<s:Button id="btnAdd" label="Link Screen ..." click="btnAdd_clickHandler(event)"/>
+			<mx:Spacer width="100%" />
+		</s:HGroup>
+	</s:VGroup>			
+</s:NavigatorContent>

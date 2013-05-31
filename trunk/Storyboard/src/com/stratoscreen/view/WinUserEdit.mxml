@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"   xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="440" height="290" 
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)">
+	<s:layout>
+		<s:BasicLayout/>
+	</s:layout>
+	<fx:Declarations>
+		<mx:EmailValidator id="validEmail" source="{txtUserEmail}" property="text" />
+		<mx:StringValidator id="validPassword" source="{txtPassword}" property="text" minLength="{Constants.MINIMUM_PASSWORD_LENGTH}" />
+		<mx:StringValidator id="validFirstName" source="{txtFirstName}" property="text"/>
+		<mx:StringValidator id="validLastName" source="{txtLastName}" property="text"/>
+		<s:RadioButtonGroup id="radioStatus" />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.aws.SESEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Users;
+			import com.stratoscreen.model.views.UserEmails;
+			import com.stratoscreen.resources.NewUserEmail;
+			import com.stratoscreen.utils.LogUtils;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+						
+			[Bindable] private var _user:Users;
+			private var _allEmails:Array;			
+			private var _isDirty:Boolean = false;
+			private var _canceled:Boolean = true;
+			private var _appManager:AppManager
+
+			public function get canceled():Boolean
+			{
+				return _canceled;
+			}
+			
+			public function get user():Users
+			{
+				return _user;
+			}
+			
+			public function set user(value:Users):void
+			{
+				if (value is Users)
+				{
+					_user = Utils.copyClassObject(Users, value);
+				}
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				_appManager = this.parentApplication.appManager;
+				radActive.selected = true;
+				
+				if (_user.newUser) 
+				{
+					btnSave.label = "Save";
+					this.title = "Create user";
+
+					// Default to a user
+					_user.type = Constants.USER_TYPE_USER;					
+					ddUserType.selectedIndex = 1;
+					
+					// Set up the password
+					chkReset.visible = false;
+					chkShowPwd.enabled = true;
+					txtPassword.width = txtUserEmail.width;
+					txtPassword.enabled = true;
+					txtPassword.text = "PWD" + Utils.randomEasyReadString(5);
+				}
+				else
+				{
+					this.title = "Update user";
+					btnSave.label = "Update";
+					
+					// Update the drop down box
+					ddUserType.selectedIndex = (_user.type == Constants.USER_TYPE_MANAGER) ? 0 : 1;
+					
+					// Do not allow the current user to change their type
+					ddUserType.enabled = _user.itemName != _appManager.currentUser.itemName;
+					
+					if (_user.status == Users.STATUS_DISABLED)
+					{
+						radActive.selected = false;
+						radDisabled.selected = true;
+					}
+				}		
+				
+				this.enabled = false;
+				
+				// Get a list of ALL emails even for other accounts
+				_appManager.sdb.select("Select email from Users", queryUsersHandler, UserEmails);
+			}
+			
+			private function queryUsersHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				if (!event.success)
+				{
+					Alert.show("Could not get current user email list. Please try again later", "Query Error");
+					closeHandler(null);
+					return;
+				}	
+				
+				_allEmails = event.result as Array;
+			}
+
+			protected function closeHandler(event:CloseEvent):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				_user.email = StringUtil.trim(_user.email.toLowerCase());
+				_user.type = ddUserType.selectedItem.value;
+
+				if (!validateUser()) {return;}				
+				
+				// Update the user
+				if (_user.newUser || chkReset.selected)
+				{
+					_user.changePassword = "1";
+					_user.decryptedPassword = StringUtil.trim(txtPassword.text);
+				}
+				
+				_user.updated = true;
+				_user.status = radActive.selected ? Users.STATUS_ACTIVE : Users.STATUS_DISABLED;
+				_user.modifiedBy = _appManager.currentUser.itemName;
+				_user.modifiedDate = new Date();
+
+				_appManager.sdb.updateDomain([_user], updateUserHandler);
+				
+				// Send an email to the new user or if the password has changes
+				if (_user.newUser || _user.changePassword == "1")
+				{
+					var emailBody:String = (new NewUserEmail()).toString();
+					var pattern:RegExp = /\@@EMAIL@@/gi;
+					emailBody = emailBody.replace(pattern, user.email);
+					
+					pattern = /\@@PASSWORD@@/gi;
+					emailBody = emailBody.replace(pattern, user.decryptedPassword);
+					
+					pattern = /\@@CODE@@/gi;
+					emailBody = emailBody.replace(pattern, _appManager.accountBucket);
+					
+					_appManager.ses.sendEmail(_user.email, _appManager.currentUser.email, "Welcome to StratoScreen", emailBody, true, sendEmailHandler);
+				}
+			}
+			
+			private function sendEmailHandler(event:SESEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not send email. Message:" + event.message, "Email Error");
+					LogUtils.writeToLog(event.message);
+				}
+			}
+			
+			private function updateUserHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could update user. Please try again later", "Update Error");
+					closeHandler(null);
+					return;
+				}
+				
+				// CLose the window and signal the parent to refresh
+				_isDirty = false;
+				_canceled = false;
+				closeHandler(null);
+			}
+			
+			private function validateUser():Boolean
+			{
+				txtUserEmail.errorString = "";
+				
+				var result:ValidationResultEvent = validEmail.validate();
+				if (result.results != null)  {return false;}
+
+				if (_user.newUser || chkReset.selected)
+				{
+					result = validPassword.validate();
+					if (result.results != null)  {return false;}
+				}
+
+				result = validFirstName.validate();
+				if (result.results != null)  {return false;}
+
+				result = validLastName.validate();
+				if (result.results != null)  {return false;}
+				
+				// Loop through twice and find dups
+				for (var i:int = 0; i < _allEmails.length; i++)
+				{
+					if (_user.itemName != _allEmails[i].itemName)
+					{
+						var testEmail:String = _allEmails[i].email;
+						testEmail = StringUtil.trim(testEmail.toLowerCase());
+						
+						if ( _user.email == testEmail)
+						{
+							txtUserEmail.errorString = _user.email + " is already associated with another account.";
+							return false;							
+						}
+					}
+				}
+
+				return true;
+			}
+
+
+			protected function chkReset_clickHandler(event:MouseEvent):void
+			{
+				txtPassword.text = "PWD" + Utils.randomEasyReadString(5);
+			}
+
+		]]>
+	</fx:Script>
+	<s:Label x="11" y="17" text="Type" fontWeight="bold"/>
+	<s:DropDownList x="113" y="10" id="ddUserType" change="{_isDirty=true}" width="317" >
+		<s:dataProvider>
+			<s:ArrayCollection>
+				<fx:Object label="Manager" value="{Constants.USER_TYPE_MANAGER}" />
+				<fx:Object label="User" value="{Constants.USER_TYPE_USER}" />
+			</s:ArrayCollection>
+		</s:dataProvider>
+	</s:DropDownList>
+	<s:Label x="11" y="45" text="Status" fontWeight="bold"/>
+	<s:RadioButton x="113" y="41" label="Active" groupName="radioStatus" id="radActive"/>
+	<s:RadioButton x="175" y="41" label="Disabled" groupName="radioStatus" id="radDisabled"/>
+	<s:Label x="10" y="67" text="Email" height="20" fontWeight="bold"/>
+	<s:TextInput x="113" y="67" width="317" id="txtUserEmail" text="@{_user.email}" change="{_isDirty=true}" typographicCase="lowercase"/>
+	<s:Label x="10" y="95" text="Password" fontWeight="bold" height="20"/>
+	<s:TextInput x="113" y="95" width="261" id="txtPassword" displayAsPassword="{!chkShowPwd.selected}" change="{_isDirty=true}" enabled="{chkReset.selected}"/>
+	<s:CheckBox x="113" y="120" label="Show Password" id="chkShowPwd" fontStyle="italic" enabled="{chkReset.selected}"/>
+	<s:TextInput x="113" y="143" width="316" text="@{_user.firstName}" change="{_isDirty=true}" id="txtFirstName"/>
+	<s:Label x="10" y="143" text="First Name" fontWeight="bold" height="21"/>
+	<s:TextInput x="113" y="171" width="316" text="@{_user.lastName}" change="{_isDirty=true}" id="txtLastName"/>
+	<s:Label x="10" y="171" text="Last Name" fontWeight="bold" height="23"/>
+	<s:Button id="btnSave" click="btnSave_clickHandler(event)" label="Update" right="10" bottom="10"/>
+	<s:CheckBox x="382" y="96" label="Reset" id="chkReset" fontStyle="italic" height="19" click="chkReset_clickHandler(event)"/>
+</s:TitleWindow>

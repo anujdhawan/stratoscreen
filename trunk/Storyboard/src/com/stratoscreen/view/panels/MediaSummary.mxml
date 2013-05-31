@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				   xmlns:mx="library://ns.adobe.com/flex/mx"  xmlns:components="com.stratoscreen.components.*" 
+				   width="100%" height="160"  styleName="Panel"  creationComplete="creationCompleteHandler(event)"  >
+	<fx:Declarations>
+		<s:SolidColorStroke id="lineCallout" color="#808080" />	
+		<s:SolidColorStroke id="lineGreyBorder" color="#808080" />
+		<s:LinearGradient id="gradientBlue" rotation="45">
+			<s:GradientEntry color="#b5e4fd" ratio=".2" alpha="0.9"/>
+			<s:GradientEntry color="#75ade5" ratio=".8" alpha="0.9"/>
+		</s:LinearGradient>
+		<s:LinearGradient id="gradientRed" rotation="45">
+			<s:GradientEntry color="#DB70B8" ratio=".2" alpha="0.9"/>
+			<s:GradientEntry color="#D147A3" ratio=".8" alpha="0.9"/>
+		</s:LinearGradient>		
+		<s:LinearGradient id="gradientGreen" rotation="45">
+			<s:GradientEntry color="#00E6CF" ratio=".2" alpha="0.9"/>
+			<s:GradientEntry color="#00CCB8" ratio=".8" alpha="0.9"/>
+		</s:LinearGradient>
+		<s:LinearGradient id="gradientNavy" rotation="45">
+			<s:GradientEntry color="#284664" ratio=".2" alpha="0.9"/>
+			<s:GradientEntry color="#192B3E" ratio=".8" alpha="0.9"/>
+		</s:LinearGradient>
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.views.MediaSizes;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.charts.HitData;
+			import mx.collections.ArrayCollection;
+			import mx.events.FlexEvent;
+			
+			[Bindable][Embed(source="/assets/icons/arrow_refresh.png")]
+			private var iconRefresh:Class;	
+			
+			[Bindable] private var _queryError:Boolean;
+			[Bindable] private var _tooltip:String;
+			[Bindable] private var _counts:ArrayCollection;
+			[Bindable] private var _sizes:ArrayCollection;
+			private var _appManager:AppManager
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				loadSummaries();
+				
+				seriesCount.filters= [];
+				seriesSize.filters= [];
+			}
+			
+			private function btnRefresh_clickHandler(event:Event):void
+			{
+				loadSummaries();
+			}
+			
+			protected function loadSummaries():void
+			{
+				var sql:String = "Select mimeType, size from Medias where accountId='";
+				sql += _appManager.currentAccount.itemName + "'";
+				
+				_appManager.sdb.select(sql, queryMediaHandler, MediaSizes);
+				this.enabled = false;
+			}
+			
+			private function queryMediaHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				_queryError = event.success;
+				_tooltip = "";
+				
+				if (!event.success) 
+				{
+					_tooltip = "Error retriving Media summary. Please refresh later";
+					return;	
+				}
+				
+				// Loop through and get a summay of all the statuses
+				var total:int = 0;
+				var size:uint = 0;
+				var imageCount:int = 0;
+				var imageSize:uint = 0;
+				var swfCount:int = 0;
+				var swfSize:uint = 0;
+				var videoCount:int = 0;
+				var videoSize:uint = 0;
+				var audioCount:int = 0;
+				var audioSize:uint = 0;
+				
+				for each (var media:MediaSizes in event.result)
+				{
+					total ++;
+					size += parseFloat(media.size);
+					
+					switch (media.mediaType)
+					{
+						case Constants.MEDIA_TYPE_IMAGE:
+							imageCount ++;
+							imageSize += parseFloat(media.size);
+							break;
+
+						case Constants.MEDIA_TYPE_SWF:
+							swfCount ++;
+							swfSize += parseFloat(media.size);
+							break;
+
+						case Constants.MEDIA_TYPE_VIDEO:
+							videoCount ++;
+							videoSize += parseFloat(media.size);
+							break;
+
+						case Constants.MEDIA_TYPE_AUDIO:
+							audioCount ++;
+							audioSize += parseFloat(media.size);
+							break;
+					}
+				}
+				
+				// Set the Labels
+				lblTotalCount.text = total.toString();
+				lblTotalSize.text = Utils.formatBytes(size);
+				lblImageCount.text = imageCount.toString();
+				lblImageSize.text = Utils.formatBytes(imageSize);
+				lblSWFCount.text = swfCount.toString();
+				lblSWFSize.text = Utils.formatBytes(swfSize);
+				lblVideoCount.text = videoCount.toString();
+				lblVideoSize.text = Utils.formatBytes(videoSize);
+				lblAudioCount.text = audioCount.toString();
+				lblAudioSize.text = Utils.formatBytes(audioSize);
+					
+				// Set the data for the counts
+				_counts = new ArrayCollection();
+				var item:Object = new Object();
+				item.label = "Images";
+				item.value = imageCount;
+				_counts.addItem(item);
+				
+				item = new Object();
+				item.label = "SWFs";
+				item.value = swfCount;
+				_counts.addItem(item);
+				
+				item = new Object();
+				item.label = "Videos";
+				item.value = videoCount;
+				_counts.addItem(item);
+				
+				item = new Object();
+				item.label = "Audio";
+				item.value = audioCount;
+				_counts.addItem(item);
+
+				// Set the sizes for the counts
+				_sizes = new ArrayCollection();
+				item = new Object();
+				item.label = "Images";
+				item.value = imageSize;
+				_sizes.addItem(item);
+				
+				item = new Object();
+				item.label = "SWFs";
+				item.value = swfSize;
+				_sizes.addItem(item);
+				
+				item = new Object();
+				item.label = "Videos";
+				item.value = videoSize;
+				_sizes.addItem(item);
+
+				item = new Object();
+				item.label = "Audio";
+				item.value = audioSize;
+				_sizes.addItem(item);
+
+			}
+			
+			private function countTipHandler(hitData:HitData):String
+			{
+				var tip:String = hitData.item.label + ": " + hitData.item.value.toString();
+				return tip;
+			}
+			
+			private function sizeTipHandler(hitData:HitData):String
+			{
+				var tip:String = hitData.item.label + ": " + Utils.formatBytes(hitData.item.value);
+				return tip;
+			}
+		]]>
+	</fx:Script>
+	<s:Label x="10" y="10" text="Media Summary" fontWeight="bold" fontSize="11"/>
+	<components:IconButton id="btnRefresh" icon="{iconRefresh}" toolTip="Refresh data"
+						   click="btnRefresh_clickHandler(event)"  right="5" top="5"/>
+	
+	<s:HGroup y="0" height="100%" left="250" verticalAlign="middle"  right="30">
+		<s:Group width="135" height="100%">
+			<s:Label x="10" y="10" text="Counts" fontWeight="bold"/>
+			<mx:PieChart  id="chartCount"  dataProvider="{_counts}" y="10" width="135" height="135" showDataTips="true" dataTipFunction="countTipHandler">
+				<mx:series>
+					<mx:PieSeries id="seriesCount" nameField="label"	labelPosition="none" outerRadius="100"
+								  field="value" radialStroke="{lineGreyBorder}"  calloutStroke="{lineCallout}" 
+								  stroke="{lineGreyBorder}" fills="{[gradientBlue, gradientRed, gradientGreen, gradientNavy]}" />		
+				</mx:series>
+			</mx:PieChart>							
+		</s:Group>
+		<s:Group width="135" height="100%">
+			<s:Label x="10" y="10" text="Sizes" fontWeight="bold"/>			
+			<mx:PieChart id="chartSize" dataProvider="{_sizes}" y="10" width="135" height="135" showDataTips="true" dataTipFunction="sizeTipHandler">
+				<mx:series>
+					<mx:PieSeries id="seriesSize" nameField="label"	labelPosition="none" outerRadius="100"
+								  field="value" radialStroke="{lineGreyBorder}"  calloutStroke="{lineCallout}" 
+								  stroke="{lineGreyBorder}" fills="{[gradientBlue, gradientRed, gradientGreen, gradientNavy]}" />		
+				</mx:series>
+			</mx:PieChart>		
+		</s:Group>
+		<mx:Spacer width="100%" />
+	</s:HGroup>
+	
+	<s:VGroup y="35" left="10" width="90" gap="8">
+		<s:HGroup verticalAlign="middle">
+			<mx:Image width="16" height="16" source="@Embed('/assets/icons/image.png')" />
+			<s:Label text="Images" fontWeight="bold" toolTip="{_tooltip}" width="60"/>
+			<s:Label id="lblImageCount" text="" width="25"/>
+			<s:Label id="lblImageSize" text=" " />					
+		</s:HGroup>		
+		<s:HGroup verticalAlign="middle">
+			<mx:Image width="16" height="16" source="@Embed('/assets/icons/swf.png')" />
+			<s:Label text="SWFs" fontWeight="bold" toolTip="{_tooltip}" width="60" />
+			<s:Label id="lblSWFCount" text="" width="25"/>
+			<s:Label id="lblSWFSize" text=" " />					
+		</s:HGroup>		
+		<s:HGroup verticalAlign="middle">
+			<mx:Image width="16" height="16" source="@Embed('/assets/icons/film.png')" />
+			<s:Label text="Videos" fontWeight="bold" toolTip="{_tooltip}"  width="60"/>
+			<s:Label id="lblVideoCount" text="" width="25"/>
+			<s:Label id="lblVideoSize" text=" " />					
+		</s:HGroup>		
+		<s:HGroup verticalAlign="middle">
+			<mx:Image width="16" height="16" source="@Embed('/assets/icons/audio.png')" />
+			<s:Label text="Audio" fontWeight="bold" toolTip="{_tooltip}"  width="60"/>
+			<s:Label id="lblAudioCount" text="" width="25"/>
+			<s:Label id="lblAudioSize" text=" " />					
+		</s:HGroup>		
+		<s:HGroup verticalAlign="middle">
+			<s:Label text=" " width="16" />	<!-- space holder for image -->
+			<s:Label text="Total" fontWeight="bold" toolTip="{_tooltip}"  width="60"/>
+			<s:Label id="lblTotalCount" text="" width="25"/>
+			<s:Label id="lblTotalSize" text=" " />
+		</s:HGroup>
+	</s:VGroup>
+
+</s:BorderContainer>

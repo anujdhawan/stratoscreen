@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"
+		 xmlns:s="library://ns.adobe.com/flex/spark"
+		 xmlns:mx="library://ns.adobe.com/flex/mx"
+		 xmlns:components="com.stratoscreen.components.*"
+		 width="100%" height="100%" click="dispatchClickEvent()" 
+		 creationComplete="creationCompleteHandler(event)" currentState="media"
+		 mouseOut="mouseOutHandler(event)" mouseOver="mouseOverHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.ImageCacheManager;
+			import com.stratoscreen.model.domains.Medias;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.events.FlexEvent;
+			
+			import spark.components.RichText;
+			import spark.events.TextOperationEvent;
+			
+			public static const ITEM_CLICK:String = "ITEM_CLICK";
+
+			[Bindable] public var baseIsSWF:Boolean = false;
+			[Bindable] private var _selected:Boolean = false;
+
+			private var _appManager:AppManager;
+			private var _awsEndpoint:AWSEndpoint;
+ 			private var _overlayDetail:OverlayDetail;
+			
+			[Bindable]
+			public function get overlayDetail():OverlayDetail
+			{
+				return _overlayDetail;
+			}
+
+			public function set overlayDetail(value:OverlayDetail):void
+			{
+				_overlayDetail = value;
+				
+				switch (_overlayDetail.type)
+				{
+					case OverlayDetail.TYPE_MEDIA:
+						this.currentState = "media";
+						break;
+					
+					case OverlayDetail.TYPE_TEXT:
+						this.currentState = "text";
+						break;
+				}				
+			}
+
+			public function get selected():Boolean
+			{
+				return _selected;
+			}
+
+			public function set selected(value:Boolean):void
+			{
+				_selected = value;
+			}
+
+			[Deprecated] public function get maintainAspect():Boolean
+			{
+				return false;
+			}
+			
+			public function closeMenus():void
+			{
+				btnAttributes.unSelect();
+				btnAttributes.invalidateDisplayList();
+			}
+			
+			public function updateRotate():void
+			{
+				btnAttributes.rotation = 360 - parseFloat(overlayDetail.rotate);
+			}
+			
+			public function updateTextSize():void
+			{
+				richText.invalidateSize();
+			}
+
+			public function updateTextColor(color:uint):void
+			{
+				richText.setStyle("color", color);
+			}
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				_appManager.addEventListener(AppManager.OVERLAY_EDIT_SCALE_CHANGE, overlayScaleChangeHandler);
+				_awsEndpoint = AWSRegions.getAWSEndpoint(_appManager.regionId);
+
+				btnAttributes.overlayDetail = overlayDetail;
+				btnAttributes.scaleX = 1 / _appManager.overlayEditScale;
+				btnAttributes.scaleY = 1 / _appManager.overlayEditScale;
+				
+				imgThumb.visible = false;
+				swfLoading.visible = false;
+				lblDuration.visible = false;
+								
+				switch(overlayDetail.type)
+				{
+					case OverlayDetail.TYPE_MEDIA:
+						var url:String;
+						url = "https://" + _awsEndpoint.s3 + "/" + _appManager.currentAccount.bucket;
+						url += "/" + Constants.THUMB_PREFIX + overlayDetail.mediaId + Constants.THUMB_EXTENSION;
+						
+						swfLoading.visible = true;
+						imgThumb.source = ImageCacheManager.getInstance().getImageByURL(url);
+						imgThumb.load();
+						
+						// Show the duration of the audio. It is helpful for creating overlays
+						if (overlayDetail.isAudio)
+						{
+							var media:Medias = _appManager.getMedia(overlayDetail.mediaId);
+							var duration:int = parseInt(media.duration);
+							if (duration == 0) {duration = parseInt(media.calcDuration);}
+							lblDuration.visible = true;
+							lblDuration.text = Utils.formatDuration(duration);
+						}
+						break; 
+
+					case OverlayDetail.TYPE_TEXT:
+						//Manually add the text item. It is causing resizing issues
+						swfLoading.visible = false;
+				}
+				
+				// Draw the items as expected
+				updateItemProperties();
+			}
+			
+			private function overlayScaleChangeHandler(event:Event):void
+			{
+				btnAttributes.scaleX = 1 / _appManager.overlayEditScale;
+				btnAttributes.scaleY = 1 / _appManager.overlayEditScale;
+			}
+			
+			[Deprecated] public function setTextProperties():void
+			{
+				if (richText == null) {return;}
+			}
+			
+			private function updateItemProperties():void
+			{
+				this.width = parseFloat(overlayDetail.width);
+				this.height = parseFloat(overlayDetail.height);				
+				this.x = parseFloat(overlayDetail.x);
+				this.y = parseFloat(overlayDetail.y);
+				this.rotation = parseFloat(overlayDetail.rotate);
+				groupMain.alpha = parseFloat(overlayDetail.alpha);	// We want the controls to stay visible
+				
+				updateRotate();
+			}
+
+			protected function mouseOverHandler(event:MouseEvent):void
+			{
+			}
+
+
+			protected function mouseOutHandler(event:MouseEvent):void
+			{
+			}
+
+
+			protected function imgThumb_completeHandler(event:Event):void
+			{
+				swfLoading.visible = false;
+				imgThumb.visible = true;
+			}
+
+			protected function imgThumb_ioErrorHandler(event:IOErrorEvent):void
+			{
+				// Just highlight the missing thumb for now
+				groupBorder.setStyle("backgroundAlpha","0.66");
+				swfLoading.visible = false;
+				imgThumb.visible = false;
+			}
+
+			private function dispatchClickEvent():void
+			{
+				this.dispatchEvent(new Event(ITEM_CLICK));
+			}
+
+		]]>
+	</fx:Script>
+	<s:states>
+		<s:State name="text"/>
+		<s:State name="media"/>
+	</s:states>
+	<s:BorderContainer id="groupBorder" width="100%" height="100%" backgroundAlpha="0.0"
+					   borderColor="#00FF00" borderVisible="{overlayDetail.lockedBool || overlayDetail.hasError}" borderWeight="1"
+					   contentBackgroundAlpha="0.0">
+		<s:Group id="groupMain" width="100%" height="100%" >
+			<s:SWFLoader id="swfLoading" horizontalCenter="0" verticalCenter="0" width="33%" height="33%" 
+						  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true" click="dispatchClickEvent()"/>	
+			<mx:Image id="imgThumb" height="100%" width="100%" scaleContent="true" maintainAspectRatio="false" smoothBitmapContent="true" 
+					  complete="imgThumb_completeHandler(event)" ioError="imgThumb_ioErrorHandler(event)" 
+					  click="dispatchClickEvent()" filters="{overlayDetail.filters}"  />
+			<s:Label id="lblDuration" bottom="0" width="100%" fontSize="18" fontStyle="normal"
+					 fontWeight="bold">
+				<s:filters>
+					<s:GlowFilter color="#ffffff" blurX="5" blurY="5" strength="2" />
+				</s:filters>
+			</s:Label>
+			<s:RichText id="richText" width="100%" height="100%"  includeIn="text"
+						visible="{overlayDetail.type == OverlayDetail.TYPE_TEXT}" text="{overlayDetail.text}"
+					    fontFamily="{overlayDetail.fontFamily}" fontSize="{overlayDetail.fontSizeNum}" fontStyle="{overlayDetail.fontStyle}"
+						fontWeight="{overlayDetail.fontWeight}" textDecoration="{overlayDetail.textDecoration}" 
+						color="{overlayDetail.colorNum}" filters="{overlayDetail.filters}" />
+		</s:Group>
+	</s:BorderContainer>
+	<s:Group visible="{_selected}" horizontalCenter="0" verticalCenter="0">
+		<components:AttributeOptions id="btnAttributes"  baseIsSWF="{baseIsSWF}" />
+	</s:Group>
+</s:Group>	

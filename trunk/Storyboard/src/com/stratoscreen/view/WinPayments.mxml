@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+			   xmlns:s="library://ns.adobe.com/flex/spark"
+			   xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="this_creationCompleteHandler(event)"
+			   close="this_closeHandler(event)" title="Amazon Payments" minWidth="950">
+	<s:layout>
+		<s:VerticalLayout horizontalAlign="right" paddingBottom="10" paddingLeft="10" paddingRight="10" paddingTop="10"/>
+	</s:layout>
+	<fx:Declarations>
+		<s:HTTPService id="httpGetUrl" url="http://localhost:8081/stratoWeb/aws/getCBUrl.php" method="POST" 
+					   result="httpGetUrl_resultHandler(event)" fault="httpGetUrl_faultHandler(event)">
+			<s:request xmlns="">
+				<token>{TOKEN}</token>
+				<action>{_action}</action>
+				<billingRef>{_billingRef}</billingRef>
+				<licenseCount>{_licenseCount}</licenseCount>
+			</s:request>
+		</s:HTTPService>
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.FPSClass;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.BillingRow;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.CursorManager;
+			import mx.managers.PopUpManager;
+			import mx.rpc.events.FaultEvent;
+			import mx.rpc.events.ResultEvent;
+			import mx.utils.URLUtil;
+			
+			public static const BILLING_VIEW:int = 1;
+			public static const BILLING_ADD:int = 2;
+			public static const BILLING_CANCEL:int = 4;
+			
+			private const TOKEN:String = "87dd97e84e094613809cbd7dba436f32";			
+			private const SUMMARY_SCRIPT:String = "cbSummary.php";
+			private const SUBSCRIPTION_ID_FIELD:String = "subscriptionId";
+			private const SUCCESS_FIELD:String = "success";
+			
+			[Bindable] private var _action:String;
+			[Bindable] private var _billingRef:String = "";
+			[Bindable] private var _licenseCount:String = "";
+			private var _appManager:AppManager;
+			
+			public function setAction(action:int, licenseCount:int = 0, billingRef:String = ""):void
+			{
+				_action = action.toString();
+				_licenseCount =  licenseCount.toString();
+				_billingRef = billingRef;
+				
+				switch (action)
+				{
+					case BILLING_VIEW:
+						this.title = "Amazon Payments - View Billing";
+						break;
+					
+					case BILLING_ADD:
+						this.title = "Amazon Payments - Add Billing";
+						break;
+						
+					case BILLING_CANCEL:
+						this.title = "Amazon Payments - Cancel Billing";
+						break;
+				}
+			}
+			
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				PopUpManager.centerPopUp(this);
+				
+				html.addEventListener(Event.COMPLETE, html_CompleteHandler);
+				
+				httpGetUrl.send();
+				this.enabled = false;
+			}
+			
+			
+
+			protected function this_closeHandler(event:CloseEvent):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+				CursorManager.removeAllCursors();
+			}
+			
+			protected function btnClose_clickHandler(event:MouseEvent):void
+			{
+				this_closeHandler(null);
+			}
+			
+			private function html_CompleteHandler(event:Event):void
+			{
+				lblStatus.text = "";
+				CursorManager.removeAllCursors();
+			}
+			
+			protected function html_locationChangeHandler(event:Event):void
+			{
+				lblStatus.text = "Loading...";
+				CursorManager.setBusyCursor();
+				
+				try
+				{
+					var sections:Array = html.location.split("?");
+					var billingArray:Array;
+					var row:BillingRow;
+
+					// Watch for a summary screen. 
+					// If we get that, then we need to update the database
+					if (sections[0].indexOf(SUMMARY_SCRIPT) > 0)
+					{
+						// Split the URL
+						var fields:Array = sections[1].split("&");
+						
+						// Find the subscrition id
+						// and sucess fields
+						var subscriptionId:String = "";
+						var success:Boolean = false;
+						
+						for (var i:int = 0; i < fields.length; i++)
+						{
+							if (fields[i].indexOf(SUBSCRIPTION_ID_FIELD) >=0)
+							{
+								subscriptionId = fields[i].toString().replace(SUBSCRIPTION_ID_FIELD + "=", "");
+								
+							}
+							
+							if (fields[i].indexOf(SUCCESS_FIELD) >=0)
+							{
+								var sucessString:String = fields[i].toString().replace(SUBSCRIPTION_ID_FIELD + "=", ""); 
+								success = sucessString == "1";
+							}
+						}
+						
+						
+						if (_action == BILLING_ADD.toString())
+						{
+							if (subscriptionId == null || subscriptionId == "") {throw new Error("Did not find subscription id");}
+								
+							// Add the latest transaction to the account
+							row = new BillingRow();
+							row.subscriptionId = subscriptionId;
+							row.screenCount = parseInt(_licenseCount);
+							
+							// Do not update the array directly. 
+							// We need to set the property so the Class converts to a string
+							billingArray = _appManager.currentAccount.billingArray;
+							billingArray.push(row);
+							
+							_appManager.currentAccount.billingArray = billingArray;
+						}
+						else if (_action == BILLING_CANCEL.toString())
+						{
+							if (success)
+							{
+								// Remove the subscription ID from the array							
+								billingArray = new Array(); 
+								for each (row in _appManager.currentAccount.billingArray)
+								{
+									if (row.subscriptionId != _billingRef)
+									{
+										billingArray.push(row);
+									}
+								}
+								
+								// Reset the array without the canceled billing row
+								_appManager.currentAccount.billingArray = billingArray;					
+							}
+							else
+							{
+								Alert.show("The subscription cancellation step failed. \r\n" +
+									       "Please cancel the subscription directly though Amazon Payments. \r\n" +
+									        "Also, please contact StratoScreen support to recomcile the records.", "Cancellation error");								
+								return;
+							}
+						}
+						
+						// Update the record
+						this.enabled = false;
+						_appManager.currentAccount.updated = true;
+						_appManager.sdb.updateDomain([_appManager.currentAccount], updateHandler);
+					}
+				}
+				catch (err:Error)
+				{
+					Alert.show("The reconciliation step failed. " +
+						       "This error will not affect your Amazon billing but the StratoScreen summary may be incorrect.\r\n" +
+							   "Please contact StratoScreen support about this error.", "Reconciliation error");
+					this.enabled = true;
+				}
+			}
+			
+			private function removeSubscriptionHandler(event:CloseEvent):void
+			{
+				
+			}
+			
+			protected function httpGetUrl_resultHandler(event:ResultEvent):void
+			{
+				this.enabled = true;
+				
+				html.location = event.result.toString();
+			}
+			
+			protected function httpGetUrl_faultHandler(event:FaultEvent):void
+			{
+				this.enabled = true;
+				
+				Alert.show("Could not open paymemts web page. Please try again later","Load Error");
+			}
+			
+			private function updateHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				if (!event.success)
+				{
+					Alert.show("The reconciliation save failed. " +
+						"This error will not affect your Amazon billing but the StratoScreen summary may be incorrect.\r\n" +
+						"Please contact StratoScreen support about this error.", "Reconciliation save error");
+				}
+			}
+			
+		]]>
+	</fx:Script>
+	<mx:HTML id="html" locationChange="html_locationChangeHandler(event)" width="100%" height="100%"/>
+	<s:controlBarContent>
+		<s:Label id="lblStatus" />
+	</s:controlBarContent>
+
+</s:TitleWindow>

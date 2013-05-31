@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*"
+		 minHeight="135" minWidth="150" creationComplete="creationCompleteHandler(event)"  
+		 contentBackgroundAlpha="0.0">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.Medias;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			import com.stratoscreen.model.domains.Overlays;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.utils.LogUtils;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.events.FlexEvent;
+			
+			[Bindable][Embed(source="/assets/icons/control_play_blue.png")]
+			private var iconPlay:Class;			
+			[Bindable][Embed(source="/assets/icons/control_stop_blue.png")]
+			private var iconStop:Class;
+			[Bindable][Embed(source="/assets/icons/arrow_out.png")]
+			private var iconZoom:Class;				
+
+			[Bindable] public var fullScreen:Boolean = false;
+			public var fullScreenBounds:Rectangle = null;
+			
+			private var _appManager:AppManager;
+			private var _awsEndpoint:AWSEndpoint;
+			private var _overlay:Overlays;
+			private var _overlayDetail:ArrayCollection;
+			private var _canvasElements:Array;
+			private var _frameNumber:int;
+			private var _startTime:Date;
+			private var _timer:Timer;
+			private var _imageUtils:ImageUtils;
+			private var _viewMode:String = null;
+
+			public function get viewMode():String
+			{
+				return _viewMode;
+			}
+			
+			public function set viewMode(value:String):void
+			{
+				_viewMode = value;
+			}			
+
+			public function get channelOverlay():Overlays
+			{
+				return _overlay;
+			}
+
+			public function set channelOverlay(value:Overlays):void
+			{
+				if (value == null) {return;}
+				if (groupPreview == null) {return;} // STill rendering
+				
+				_overlay = value;
+				this.enabled = false;
+				groupThumb.visible = true;
+				rectBackground.visible = false;
+				
+				if (_viewMode == null) {_viewMode = _appManager.currentAccount.defaultScreenView;}
+				_imageUtils = new ImageUtils(_viewMode);				
+				
+				// Get the Overlay detail
+				var sql:String = "Select * from OverlayDetail where overlayId = '" + _overlay.itemName + "'";
+				sql += "and z is not null order by z";
+				_appManager.sdb.select(sql, queryDetailHandler, OverlayDetail);				
+			}
+
+			public function stop():void
+			{
+				btnStop_clickHandler(null);
+			}
+			
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				_awsEndpoint = AWSRegions.getAWSEndpoint(_appManager.regionId);
+				_imageUtils = new ImageUtils(_appManager.currentAccount.defaultScreenView);
+				
+				this.channelOverlay = _overlay;	// Draw the component
+			}
+			
+			private function queryDetailHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					LogUtils.writeToLog("Could not load detail for " + _overlay.itemName);
+					return;
+				}
+				
+				_overlayDetail = new ArrayCollection();
+				_overlayDetail.source = event.result as Array;
+				
+				// Loop through and set the localUrls for play back
+				for each (var detail:OverlayDetail in _overlayDetail)
+				{
+					if (detail.type != OverlayDetail.TYPE_TEXT)
+					{
+						// Double check for stage3d SWFs (accelerated). We'll have to display 
+						// the thumbnail for this preview
+						if (detail.accelerated == "1")
+						{
+							var thumb:String = Constants.THUMB_PREFIX + detail.mediaId + Constants.THUMB_EXTENSION;
+							detail.localUrl = _appManager.s3.getSelectURL(_appManager.currentAccount.bucket, thumb);
+						}
+						else
+						{
+							detail.localUrl = _appManager.s3.getSelectURL(_appManager.currentAccount.bucket, detail.mediaId);
+						}
+					}						
+				}
+
+				
+				// Size the play canvas to match the base media
+				var baseWidth:Number = parseFloat(_overlay.width);
+				var baseHeight:Number = parseFloat(_overlay.height);
+				var rect:ResizeRectangle= _imageUtils.getBestFit(baseWidth, baseHeight, groupPreview.width, groupPreview.height);
+				
+				canvas.x = rect.x;
+				canvas.y = rect.y;
+				canvas.width = baseWidth;
+				canvas.height = baseWidth;
+				canvas.scaleX = rect.scaleX;
+				canvas.scaleY = rect.scaleY;
+				
+				rectBackground.x = rect.x;
+				rectBackground.y = rect.y;
+				rectBackground.width = rect.width;
+				rectBackground.height = rect.height;
+				
+				this.enabled = true;				
+			}
+			
+			protected function swfBase_completeHandler(event:Event):void
+			{
+				addOverlayDetail();
+			}
+
+			protected function swfBase_enterFrameHandler(event:Event):void
+			{
+				if (_canvasElements == null) {return;}
+				
+				_frameNumber ++;
+				for (var i:int = 0; i < _canvasElements.length; i++)
+				{
+					_canvasElements[i].currentFrame = _frameNumber; 	// Assume the children has the currentFrame property
+				}
+			}
+
+			private function addOverlayDetail():void
+			{
+				_canvasElements = new Array();
+				_frameNumber = -1;	// We want to start at Zero on first loop
+				
+				for each (var detail:OverlayDetail in _overlayDetail)
+				{
+					switch (detail.type)
+					{
+						case OverlayDetail.TYPE_TEXT:
+							var text:OverlayDisplayText = new OverlayDisplayText();
+							text.overlayDetail = detail;
+							
+							text.text = detail.text;
+							text.x = parseFloat(detail.x);
+							text.y = parseFloat(detail.y);
+							text.width = parseFloat(detail.width);
+							text.height = parseFloat(detail.height);
+							text.rotation = parseFloat(detail.rotate);
+							text.alpha =  parseFloat(detail.alpha);
+							text.setStyle("color", "#" + detail.color);
+							text.setStyle("fontFamily", detail.fontFamily);
+							text.setStyle("fontSize", detail.fontSize);
+							text.setStyle("fontStyle", detail.fontStyle);
+							text.setStyle("fontWeight", detail.fontWeight);
+							text.setStyle("textDecoration", detail.textDecoration);
+							text.filters = detail.filters;
+							text.visible = false;	// The controll will set back to visible
+							
+							canvas.addElement(text);
+							_canvasElements.push(text);
+							break;
+						
+						case OverlayDetail.TYPE_MEDIA:							
+							if (detail.isImage || detail.isSWF)
+							{							
+								var swf:OverlayDisplaySWF = new OverlayDisplaySWF();
+								swf.overlayDetail = detail;
+								swf.x = parseFloat(detail.x);
+								swf.y = parseFloat(detail.y);
+								swf.width = parseFloat(detail.width);
+								swf.height = parseFloat(detail.height);
+								swf.rotation = parseFloat(detail.rotate);
+								swf.alpha =  parseFloat(detail.alpha);		
+								swf.filters = detail.filters;
+								
+								canvas.addElement(swf);
+								_canvasElements.push(swf);
+							}
+							else if (detail.isAudio)
+							{
+								var aud:OverlayDisplayAudio = new OverlayDisplayAudio();
+								aud.overlayDetail = detail;
+								
+								canvas.addElement(aud);
+								_canvasElements.push(aud);								
+							}
+							break;
+					}
+				}				
+			}
+
+			protected function btnPlay_clickHandler(event:MouseEvent):void
+			{
+				groupThumb.visible = false;
+				rectBackground.visible = true;
+				btnPlay.enabled = false;
+				btnStop.enabled = true;
+				addOverlayDetail();
+
+				_startTime = new Date();
+				_timer = new Timer(500);
+				_timer.addEventListener(TimerEvent.TIMER, timerHandler);
+				_timer.start();
+			}
+				
+			protected function btnStop_clickHandler(event:MouseEvent):void
+			{
+				groupThumb.visible = true;
+				rectBackground.visible = false;
+				canvas.removeAllElements();
+				btnPlay.enabled = true;
+				btnStop.enabled = false;			
+			}
+			
+			private function timerHandler(event:TimerEvent):void
+			{
+				// Keep track of how long the media has played
+				var duration:int = parseInt(_overlay.duration);								
+
+				var now:Date = new Date();
+				var milliElapsed:Number = now.time - _startTime.time;
+				
+				if (milliElapsed > (duration * 1000))
+				{
+					_timer.stop();
+					this.stop();
+				}
+			}
+			
+			protected function btnZoom_clickHandler(event:MouseEvent):void
+			{
+				this.stop();
+				this.parentApplication.storyboard.showLargePreview(Constants.PREVIEW_CHANNEL_OVERLAY, _overlay);
+			}
+
+			
+		]]>
+	</fx:Script>
+	<s:Group id="groupThumb" horizontalCenter="0" verticalCenter="0" visible="{!fullScreen}">
+		<mx:Image id="imgFilm" source="@Embed('/assets/images/filmStrip.png')" scaleContent="false" width="128" height="69" />
+		<mx:Image id="imgOverlay" scaleContent="false"  source="@Embed('/assets/images/overlay.png')" x="75" y="29"/>		
+		<mx:Image id="imgOverlayImage" scaleContent="false"  source="@Embed('/assets/images/overlayImage.png')" x="19" y="7"/>		
+	</s:Group>
+	<s:Group id="groupPreview" width="100%" height="100%" x="0" y="0" clipAndEnableScrolling="true">
+		<s:Rect id="rectBackground" width="100%" height="100%">
+			<s:fill>
+				<s:LinearGradient rotation="-45">
+					<s:GradientEntry color="#E0E0E0" />
+					<s:GradientEntry color="#FFFFFF" />
+					<s:GradientEntry color="#E0E0E0" />
+				</s:LinearGradient>
+			</s:fill>
+		</s:Rect>
+		<s:Group id="canvas" clipAndEnableScrolling="true" contentBackgroundAlpha="0.0" />
+	</s:Group>
+	<s:HGroup id="groupControls" width="100%" gap="1" height="22" bottom="0" right="22">
+		<mx:Spacer width="100%" />
+		<components:IconButton id="btnPlay" icon="{iconPlay}" click="btnPlay_clickHandler(event)" />
+		<components:IconButton id="btnStop" icon="{iconStop}" click="btnStop_clickHandler(event)" enabled="false" />
+		<mx:Spacer width="100%" />
+	</s:HGroup>
+	<components:IconButton id="btnZoom" icon="{iconZoom}" right="0" visible="{!fullScreen}"
+						   click="btnZoom_clickHandler(event)" toolTip="Preview in larger window" bottom="0"/>
+
+</s:Group>

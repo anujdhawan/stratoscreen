@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		       xmlns:mx="library://ns.adobe.com/flex/mx"  minWidth="900" minHeight="540" 
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)" xmlns:components="com.stratoscreen.components.*">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.Channels;
+			import com.stratoscreen.model.domains.MediaGroups;
+			import com.stratoscreen.model.domains.Medias;
+			import com.stratoscreen.model.domains.Overlays;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.utils.SharedUtils;
+			
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ResizeEvent;
+			import mx.managers.PopUpManager;
+			
+			private const ASPECT_INDEX:String = "ASPECT_INDEX";
+			private const VIEW_INDEX:String = "VIEW_INDEX";
+			
+			public var previewType:String;
+			public var previewData:Object;
+			
+			[Bindable] private var _canStream:Boolean = false;
+			[Bindable] private var _isAccelerated:Boolean = false;
+			private var _player:Object = null;
+			private var _isDataSet:Boolean = false;
+			private var _borderRect:ResizeRectangle = null;
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				this.title = previewData.name;
+				
+				// What was the last view the user used?
+				var aspectIndex:int = parseInt(SharedUtils.getValue(ASPECT_INDEX, "0").toString());
+				var viewIndex:int =  parseInt(SharedUtils.getValue(VIEW_INDEX, "-1").toString());
+				
+				ddAspect.selectedIndex = aspectIndex;
+				
+				if (viewIndex < 0)
+				{
+					// Set the tv view mode to default
+					var viewMode:String = this.parentApplication.appManager.currentAccount.defaultScreenView;
+					for (var i:int = 0; i < ddViewMode.dataProvider.length; i++)
+					{
+						if (ddViewMode.dataProvider[i].value == viewMode)
+						{
+							ddViewMode.selectedIndex = i;
+							break;
+						}
+					}
+				}
+				else
+				{
+					ddViewMode.selectedIndex = viewIndex;
+				}
+				
+				setAspectAndReset();
+			}
+			
+			private function setAspectAndReset():void
+			{
+				// Set the border container to match the aspect ration
+				var aspectWidth:int;
+				var aspectHeight:int;
+				
+				if (_player != null) {_player.stop();}
+				
+				if (ddAspect.selectedItem.value == "1")
+				{					
+					aspectWidth = 1920; // Typical wide screen HD
+					aspectHeight = 1080;
+				}
+				else
+				{
+					aspectWidth = 640; // Typical standard reolution
+					aspectHeight = 480;					
+				}
+				
+				// Get the size of the sample screen. We'll use the letter box mode
+				// so we can keep the exact aspect
+				var imageUtils:ImageUtils = new ImageUtils(Constants.VIEW_LETTERBOX);
+				_borderRect = imageUtils.getBestFit(aspectWidth, aspectHeight, groupMain.width, groupMain.height, true);
+
+				borderTV.x = _borderRect.x;
+				borderTV.y = _borderRect.y;
+				borderTV.width = _borderRect.width;
+				borderTV.height = _borderRect.height;
+								
+				switch (previewType)
+				{
+					case Constants.PREVIEW_MEDIA:
+						vsMain.selectedIndex = 1;
+						break;
+					
+					case Constants.PREVIEW_GROUP:
+						vsMain.selectedIndex = 2;
+						break;
+					
+					case Constants.PREVIEW_OVERLAY:
+						vsMain.selectedIndex = 3;
+						break;
+					
+					case Constants.PREVIEW_CHANNEL:
+						vsMain.selectedIndex = 4;
+						break;		
+					
+					case Constants.PREVIEW_CHANNEL_OVERLAY:
+						vsMain.selectedIndex = 5;
+						break;
+
+					case Constants.PREVIEW_GROUP_OVERLAY:
+						vsMain.selectedIndex = 6;
+						break;							
+					
+				}
+
+				
+				// Restart the player by updating the data. The component should restart 
+				// if the data data property is overriden and written propery
+				if (_isDataSet) {this.callLater(player_creationCompleteHandler);}
+				
+				// Remember the settings
+				SharedUtils.setValue(ASPECT_INDEX, ddAspect.selectedIndex.toString());
+				SharedUtils.setValue(VIEW_INDEX, ddViewMode.selectedIndex.toString());
+			}
+
+
+			protected function closeHandler(event:CloseEvent):void
+			{
+				if (_player != null) {_player.stop();}
+				PopUpManager.removePopUp(this);
+			}
+
+
+			protected function player_creationCompleteHandler(event:FlexEvent = null):void
+			{
+				// This is the first load. Assume all player object has similar properties
+				if (event != null) {_player = event.target;}
+				_player.viewMode = ddViewMode.selectedItem.value;
+
+				// Resize the player manually. The correct height and width may not be available yet
+				if (_borderRect != null)
+				{
+					var borderWeight:Number = parseFloat(borderTV.getStyle("borderWeight"));
+					var playerWidth:Number = _borderRect.width - borderWeight * 2;
+					var playerHeight:Number =  _borderRect.height - borderWeight * 2;
+					_player.fullScreenBounds = new Rectangle(0,0, playerWidth, playerHeight);
+				}
+
+				switch (vsMain.selectedIndex)
+				{
+					case 1:
+						previewPlayer.media = previewData as Medias;
+						_canStream = Medias(previewData).canStream == "1";
+						_isAccelerated = Medias(previewData).accelerated == "1";
+						if (previewPlayer != null) {previewPlayer.stream = chkStream.selected;}
+						break;
+					case 2:
+						previewGroupPlayer.mediaGroup = previewData as MediaGroups;
+						break;
+					case 3:
+						overlayPlayer.mediaOverlay = previewData as Overlays;
+						break;
+					case 4:
+						channelPlayer.channel = previewData as Channels;
+						break;
+					case 5:
+						channelOverlayPlayer.channelOverlay = previewData as Overlays;
+						break;
+					case 6:
+						mediaGroupOverlayPlayer.mediaGroupOverlay = previewData as Overlays;
+						break;					
+				}
+
+				
+				_isDataSet = true;
+			}
+
+
+		]]>
+	</fx:Script>
+
+	<s:Label x="10" y="10" text="Screen Aspect" height="23" fontWeight="bold"/>
+	<s:DropDownList x="99" y="10" id="ddAspect" change="setAspectAndReset()" selectedIndex="0">
+		<s:dataProvider>
+			<s:ArrayCollection>
+				<fx:Object label="HD 16:9" value="1" />
+				<fx:Object label="STD 4:3" value="2" />
+			</s:ArrayCollection>
+		</s:dataProvider>
+	</s:DropDownList>
+	<s:Label x="221" y="10" text="View Mode" height="23" fontWeight="bold"/>
+	<s:DropDownList x="289" y="9" id="ddViewMode" change="setAspectAndReset()" visible="{!_isAccelerated }">
+		<s:dataProvider>
+			<s:ArrayCollection>
+				<fx:Object label="Stretch to fit" value="{Constants.VIEW_STRETCH}" />
+				<fx:Object label="Letterbox" value="{Constants.VIEW_LETTERBOX}" />
+				<fx:Object label="Full" value="{Constants.VIEW_FULL}" />
+			</s:ArrayCollection>
+		</s:dataProvider>
+	</s:DropDownList>
+
+	<s:Group id="groupMain" left="10" top="40" right="10" bottom="10" >
+		<s:BorderContainer id="borderTV"  dropShadowVisible="false" borderColor="#000000" borderWeight="6"  
+							backgroundColor="#000000">			
+			<s:Group width="100%" height="100%" clipAndEnableScrolling="true">
+				<s:Rect width="100%" height="100%">
+					<s:fill>
+						<s:LinearGradient rotation="-45">
+							<s:GradientEntry color="#202020" />
+							<s:GradientEntry color="#404040" />
+							<s:GradientEntry color="#202020" />
+						</s:LinearGradient>
+					</s:fill>
+				</s:Rect>
+				<mx:ViewStack id="vsMain"  width="100%" height="100%">
+					<s:NavigatorContent label="Blank" width="100%" height="100%">
+						<!-- Default to a blank screen --> 
+					</s:NavigatorContent>
+					<s:NavigatorContent label="Media" x="0" y="0" width="100%" height="100%">
+						<components:MediaPlayer id="previewPlayer" height="100%" width="100%" fullScreen="true" creationComplete="player_creationCompleteHandler(event)"  />
+					</s:NavigatorContent>
+					<s:NavigatorContent label="Media Group" width="100%" height="100%">
+						<components:MediaGroupPlayer id="previewGroupPlayer" height="100%" width="100%"  fullScreen="true" creationComplete="player_creationCompleteHandler(event)" />
+					</s:NavigatorContent>
+					<s:NavigatorContent label="Overlay" width="100%" height="100%">
+						<components:MediaOverlayPlayer id="overlayPlayer" height="100%" width="100%"  fullScreen="true" creationComplete="player_creationCompleteHandler(event)" />
+					</s:NavigatorContent>
+					<s:NavigatorContent label="Channel" width="100%" height="100%">
+						<components:ChannelPlayer id="channelPlayer" height="100%" width="100%"  fullScreen="true" creationComplete="player_creationCompleteHandler(event)"/>
+					</s:NavigatorContent>
+					<s:NavigatorContent label="Channel Overlay" width="100%" height="100%">
+						<components:ChannelOverlayPlayer id="channelOverlayPlayer" height="100%" width="100%"  fullScreen="true" creationComplete="player_creationCompleteHandler(event)"/>
+					</s:NavigatorContent>
+					<s:NavigatorContent label="Media Group Overlay" width="100%" height="100%">
+						<components:MediaGroupOverlayPlayer id="mediaGroupOverlayPlayer" height="100%" width="100%"  fullScreen="true" creationComplete="player_creationCompleteHandler(event)"/>
+					</s:NavigatorContent>					
+				</mx:ViewStack>
+			</s:Group>
+		</s:BorderContainer>
+	</s:Group>
+	<s:Label x="417" y="9" text="Stream" height="23" fontWeight="bold" visible="{_canStream}"/>
+	<s:CheckBox x="462" y="8" id="chkStream"  height="22" click="setAspectAndReset()" visible="{_canStream}"/>
+</s:TitleWindow>
