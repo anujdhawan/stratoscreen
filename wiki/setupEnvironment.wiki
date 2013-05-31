@@ -1,0 +1,5 @@
+=Setting up Flash Builder Environment=
+
+Your Flash Builder workspace must have a Linked Resource (${STRATO_CORE_AIR}) so the project can compile. 
+
+http://s3.amazonaws.com/stratoscreen/linkedResources.png
