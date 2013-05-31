@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*"
+			   width="276" height="190" title="About" 
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)" 
+			   >
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			[Bindable] public var appVersion:String; 
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+			}
+
+			protected function link_clickHandler(event:MouseEvent):void
+			{
+				navigateToURL(new URLRequest("http://www.stratoscreen.com"));
+			}
+
+
+
+			protected function closeHandler(event:Event = null):void
+			{
+				PopUpManager.removePopUp(this);
+			}
+
+		]]>
+	</fx:Script>
+	<mx:Image x="10" y="10" source="@Embed('/assets/swfs/strato.swf')" maxWidth="48" maintainAspectRatio="true" maintainProjectionCenter="true"/>
+	<s:Label x="70" y="10" text="StratoScreen Player" fontWeight="bold"/>
+	<s:Label x="70" y="32" text="Version:"/>
+	<s:Label x="130" y="32" id="lblVersion" text="{appVersion}"/>
+	<s:Label x="70" y="76" text="http://www.stratoscreen.com" color="#0000FF" textDecoration="underline" buttonMode="true" useHandCursor="true" click="link_clickHandler(event)"/>
+	<s:Button label="OK"  click="closeHandler()"   width="58" horizontalCenter="-1" bottom="10" fontSize="16" fontFamily="Arial" height="25" tabEnabled="true"/>
+</s:TitleWindow>

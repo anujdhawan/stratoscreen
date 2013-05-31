@@ -1,0 +1,1104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark"
+		 xmlns:components="com.stratoscreen.components.*"
+		 creationComplete="this_creationCompleteHandler(event)">
+	<fx:Declarations>
+		<components:MediaGroupOverlayCanvas id="mediaGroupOverlayCanvas" viewMode="{_viewMode}" clipAndEnableScrolling="false" />
+	</fx:Declarations>
+	<fx:Style source="/assets/css/style.css"/>
+	<fx:Style source="/assets/css/fonts.css"/>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.PlayerConstants;
+			import com.stratoscreen.components.*;
+			import com.stratoscreen.controls.AlertWindow;
+			import com.stratoscreen.managers.*;
+			import com.stratoscreen.model.*;
+			import com.stratoscreen.model.domains.*;
+			import com.stratoscreen.model.views.*;
+			import com.stratoscreen.utils.*;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.SWFLoader;
+			import mx.core.IVisualElement;
+			import mx.events.EffectEvent;
+			import mx.events.FlexEvent;
+			
+			import spark.core.SpriteVisualElement;
+			
+			[Bindable] private var _viewMode:String;
+			private var _appManager:AppManager;
+			private var _dataManager:DataManager;
+			private var _taskManager:TaskManager;
+			private var _effectsManager:EffectsManager;
+			private var _timerMedia:Timer;
+			private var _videoCanvas:VideoCanvas;
+			private var _soundPlayer:SoundPlayer;
+			private var _soundCanvas:ChannelSoundCanvas;
+			private var _showUtils:ShowUtils;
+			private var _imageUtils:ImageUtils;
+			private var _imageUtilsVid:ImageUtils;
+			private var _swfTimeout:SWFLoaderTimeout;
+			private var _channelId:String = "";
+			private var _currentSwfLoader:Object;	// Will be a SWFLoader or Loader
+			private var _currentMedia:Medias;
+			private var _lastMedia:Medias;
+			private var _currentIsOverlay:Boolean
+			private var _channelDetail:ArrayCollection;
+			private var _audioDetail:ArrayCollection;
+			private var _overlayDetail:ArrayCollection;
+			private var _index:int;
+			private var _subIndex:int;
+			private var _frameIndex:int;
+			private var _startTime:Date;
+			private var _init:Boolean = false;
+			private var _playing:Boolean = false;
+			private var _firstPlayState:Boolean;
+			private var _missingMedia:Boolean;
+			private var _mediaGroupOverlayCanvas:MediaGroupOverlayCanvas;
+			
+			public static const NO_CHANNEL:String = "NO_CHANNEL";
+			public static const CHANNEL_CHANGE:String = "CHANNEL_CHANGE";
+			
+			protected function this_creationCompleteHandler(event:FlexEvent, startPlay:Boolean = false):void
+			{ 
+				if (_init) {return;}
+				
+				_appManager = this.parentApplication.appManager;
+				_taskManager = this.parentApplication.taskManager;
+				_dataManager =  this.parentApplication.dataManager;
+				_effectsManager = new EffectsManager();
+				_showUtils = new ShowUtils();	
+				
+				// Some of the components require statics
+				OverlayDisplaySWF.appManager = _appManager;
+				OverlayDisplaySWF.dataManager = _dataManager;
+				
+				// Set up the media timer. This checks when to start, close, and show
+				// media and overlays
+				_timerMedia = new Timer(250);
+				_timerMedia.addEventListener(TimerEvent.TIMER, timerHandler);
+				
+				_swfTimeout = new SWFLoaderTimeout();
+				_swfTimeout.addEventListener(TimerEvent.TIMER, swfTimeoutHandler);
+			
+				_init = true;
+				
+				if (startPlay) {this.callLater(play);}
+			}
+			
+			public function get isPlaying():Boolean
+			{
+				return _playing;
+			}
+			
+			public function play():void
+			{
+				// Watch for a direct call. We may not be 100% created yet
+				if (!_init) 
+				{
+					this_creationCompleteHandler(null);
+					return;
+				}
+				
+				if (_playing) {return;}
+				
+				_channelId = _dataManager.getActiveChannel(new Date());
+				_viewMode = _dataManager.screen_.viewMode;
+				_imageUtils = new ImageUtils(_viewMode);
+				
+				// If the user is stretching the video, use the Letterbox 
+				if (_viewMode == Constants.VIEW_STRETCH)
+				{
+					_imageUtilsVid = new ImageUtils();	
+				}
+				else
+				{
+					_imageUtilsVid = _imageUtils;
+				}
+				
+				// Move any recently downloaded media
+				_dataManager.filesManager.moveDownloadedMedia();
+				
+				createChannelArray();
+				
+				// Check for Screens that do not have an assigned Channel
+				if (_channelDetail.length == 0) 
+				{				
+					new AlertWindow("A channel is not assigned to this screen", "No Channel Assigned", false, null, null, true);
+					LogUtils.writeToLog("No channel assigned to screen", LogUtils.WARN);
+					
+					if (_dataManager.screen_.userControl == "1")
+					{
+						// Only dispatch the NO_CHANNEL event if the user can change the current channel
+						this.dispatchEvent(new Event(NO_CHANNEL));
+					}
+					else
+					{
+						// Play somethhing...
+						groupSwfLoaders.addElement(new GroupNoChannels());
+						_playing = true;
+					}
+					return;
+				}
+				
+				// Play the background music
+				if (_soundCanvas == null)
+				{
+					var subset:ScreenSubset = new ScreenSubset;
+					subset.mediaFolder = PlayerConstants.DIRECTORY_MEDIA;
+					subset.state = _dataManager.screen_.state;
+					subset.zip = _dataManager.screen_.zip;
+					
+					_soundCanvas = new ChannelSoundCanvas(_appManager, subset);					
+				}
+				_soundCanvas.play(_audioDetail, true);
+				
+				// Size the Channel overlay top match the group preview
+				// We will have to use the first one
+				var previewRect:Rectangle = new Rectangle(0,0, this.width, this.height);
+				channelOverlayCanvas.play(_overlayDetail, true );
+				
+				_index = -1;	// We want to at zero
+				_subIndex = 0;	// SubIndexs are treated differently from Index
+				_playing = true;
+				playNextMedia();
+			}
+			
+			public function stop():void
+			{
+				if (_timerMedia != null) {_timerMedia.stop();}			
+				
+				_playing = false;
+				groupSwfLoaders.removeAllElements();
+				mediaOverlayCanvas.removeAllElements();
+				mediaGroupOverlay.removeAllElements();
+				channelOverlayCanvas.stop();
+				
+				if (_mediaGroupOverlayCanvas != null) 
+				{
+					_mediaGroupOverlayCanvas.stop();
+					mediaGroupOverlay.removeAllElements();
+					_mediaGroupOverlayCanvas.addEventListener(MediaGroupOverlayCanvas.OVERLAY_COMPLETE, mediaGroupOverlayCompleteHandler);
+					_mediaGroupOverlayCanvas = null;
+				} 
+
+				if (_videoCanvas != null)
+				{
+					_videoCanvas.stop();
+				}
+				
+				if (_soundPlayer != null) 
+				{
+					_soundPlayer.stop();
+					_soundPlayer = null;
+				}
+				
+				if (_soundCanvas != null)
+				{
+					_soundCanvas.stop();
+					_soundCanvas = null;
+				}
+			}
+			
+			private function rewind():void
+			{				
+				//System.gc();	// Take this as an approtunity to clean up
+				
+				// Copy any media that may have been downloaded while we were playing
+				_dataManager.filesManager.moveDownloadedMedia();
+				
+				_index = -1;	// We want to at zero
+				_subIndex = 0;	// SubIndexs are treated differently from Index
+				
+				// Recreate the channel array
+				// This is very needed for randomized groups
+				createChannelArray();
+				
+				this.callLater(playNextMedia);
+			}
+			
+			private function timerHandler(event:TimerEvent):void
+			{
+				if (parseInt(_currentMedia.duration) <= 0 && parseInt(_currentMedia.frames) <= 0 )	{return;} 	// We are waiting for the media to stop by itself
+				if (_startTime == null) {return;}	// The media just started and the process has not caught up
+				
+				var now:Date = new Date();
+				var milliElapsed:Number = now.time - _startTime.time;
+				
+				if (parseInt(_currentMedia.duration) > 0)
+				{
+					if (milliElapsed > (parseInt(_currentMedia.duration) * 1000))
+					{
+						playNextMedia();
+					}
+				}
+				
+				if (parseInt(_currentMedia.frames) > 0)
+				{
+					if (_frameIndex > parseInt(_currentMedia.frames))
+					{
+						playNextMedia();
+					}
+				}
+			}
+			
+			private function swfTimeoutHandler(event:TimerEvent):void
+			{
+				try
+				{
+					// The timeout fired before the media was loaded. Either 
+					// the media was too large (unlikely), is missing,  or other issues
+					var loaderInError:SWFLoader = SWFLoaderTimeout(event.target).swfLoader;
+					if (loaderInError != null) {groupSwfLoaders.removeElement(loaderInError);}
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+				}
+				finally
+				{
+					playNextMedia();
+				}
+			}
+			
+			private function createChannelArray():void
+			{
+				var sortField:SortField = new SortField("order");
+				var filterPair:FilterPair = new FilterPair("channelId", _channelId);
+				_channelDetail = new ArrayCollection();
+				_channelDetail.source = DataUtils.sortAndFilter(_dataManager.channelDetail, [sortField], [filterPair]);
+				
+				// Load all the subdetail
+				for each(var detail:ChannelDetail in _channelDetail)
+				{
+					switch (detail.type)
+					{
+						case ChannelDetail.TYPE_GROUP:
+							detail.subDetail = getMediaGroupDetail(detail.mediaId);
+							break;
+
+						case ChannelDetail.TYPE_GROUP_OVERLAY:
+							detail.subDetail = getMediaGroupDetail(detail.mediaGroupId);
+							detail.subDetail2 = getMediaGroupOverlayDetail(detail.mediaId);
+							break;
+						
+						case ChannelDetail.TYPE_OVERLAY:
+							var zOrder:SortField = new SortField("z");
+							filterPair = new FilterPair("overlayId", detail.mediaId);
+							detail.subDetail = DataUtils.sortAndFilter(_dataManager.overlayDetail, [zOrder] , [filterPair]);
+							
+							// Find the matching Media for the sub detail too
+							for each (var overlayDetail:OverlayDetail in detail.subDetail)
+							{
+								overlayDetail.localUrl = getLocalUrl(overlayDetail.mediaId);
+							}
+							break;
+					}
+				}
+				
+				// Break out the Background Music and the Channel Overlay arrays
+				_channelDetail.filterFunction = filterChannelDetail;
+				_channelDetail.refresh();
+				
+				_audioDetail = new ArrayCollection(_channelDetail.source);
+				_audioDetail.filterFunction = filterAudioDetail;
+				_audioDetail.refresh();
+				
+				_overlayDetail = new ArrayCollection(_channelDetail.source);
+				_overlayDetail.filterFunction =  filterOverlayDetail;
+				_overlayDetail.refresh();
+			}
+			
+			public function playNextMedia(skippedCount:int = -1):void
+			{				
+				try
+				{
+					var isOverlay:Boolean = false;
+					var media:Medias = null;
+					var ignorePlayTimes:Boolean = false;
+					_firstPlayState = true;	
+					_swfTimeout.stop();
+					
+					// If it is time play a new channel. Stop what we are doing an restart
+					if (_channelId != _dataManager.getActiveChannel(new Date()))
+					{
+						this.stop();
+						this.callLater(play);
+						this.dispatchEvent(new Event(CHANNEL_CHANGE));
+						return;
+					}
+					
+					// Watch for media that was skipped due to playTimes
+					skippedCount ++;
+					if (skippedCount >= _channelDetail.length)
+					{
+						// Just play the first item to avoid a blank screen
+						LogUtils.writeToLog("A gap in media was found. Playing first time in channel without play time restrictions", LogUtils.WARN);
+						_index = -1;
+						ignorePlayTimes = true;
+						skippedCount = 0;;
+					}
+					
+					// Stop the existing
+					if (_index >= 0)
+					{
+						// Watch for elements in error. They can get things out of sync						
+						if (_index >= _channelDetail.length)
+						{
+							LogUtils.writeToLog("incorrect index value. Resting to last entry", LogUtils.WARN);
+							_index = _channelDetail.length -1;
+						}
+						
+						// Stop playing the video if we stop before it is complete					
+						if (_videoCanvas != null) {_videoCanvas.stop();	}
+						
+						if (_soundPlayer != null) 
+						{
+							_soundPlayer.stop();
+							_soundPlayer = null;
+						}
+						
+						if (_currentIsOverlay)
+						{
+							mediaOverlayCanvas.removeAllElements();
+						}
+						
+						// Clear any variables befor we increment
+						_timerMedia.stop();				
+						_currentIsOverlay = false;
+						
+						// Increment based on the type
+						switch (_channelDetail[_index].type)
+						{
+							case ChannelDetail.TYPE_MEDIA:
+							case ChannelDetail.TYPE_OVERLAY:
+								_index ++;
+								break;
+							
+							case ChannelDetail.TYPE_GROUP:
+								_subIndex ++;
+								if (_subIndex >= _channelDetail[_index].subDetail.length)
+								{
+									_subIndex = 0;
+									_index ++;
+								}
+								break;
+							
+							case ChannelDetail.TYPE_GROUP_OVERLAY:
+								_subIndex ++;							
+								if (_subIndex >= _channelDetail[_index].subDetail.length)
+								{
+									// We have played all the items in the Media Group
+									
+									// What is controlling this media overlay?
+									// The Media Group or the Media Group Overlay Duraction?
+									var duration:int = parseInt(_channelDetail[_index].duration);
+									var stopOverlay:Boolean = false; 
+									
+									if (duration <= 0)
+									{
+										stopOverlay = true;
+									}
+									else
+									{
+										if (_mediaGroupOverlayCanvas.isPlaying)
+										{										
+											_subIndex = 0; // Start the Media Group again
+										}
+										else
+										{
+											stopOverlay =  true;
+										}
+									}
+									
+									if (stopOverlay && _mediaGroupOverlayCanvas != null) 
+									{
+										_subIndex = 0;
+										_index ++;
+										
+										if (_mediaGroupOverlayCanvas != null) 
+										{
+											_mediaGroupOverlayCanvas.stop();
+											mediaGroupOverlay.removeAllElements();
+											_mediaGroupOverlayCanvas.addEventListener(MediaGroupOverlayCanvas.OVERLAY_COMPLETE, mediaGroupOverlayCompleteHandler);
+											_mediaGroupOverlayCanvas = null;
+										} 
+									}
+								}
+								break;
+							
+						}
+					}
+					else
+					{
+						_index ++;	// start at the first item.
+					}
+					
+					// Stop the process if we played too many
+					if (_index >= _channelDetail.length)
+					{
+						this.callLater(rewind);
+						return;
+					}
+										
+					// Is this item limited by time?
+					// If yes, can we play it now
+					if (!ignorePlayTimes && _channelDetail[_index].playTimesArray.length > 0)
+					{
+						var matchFound:Boolean = false;
+						for each(var playtime:PlayTimes in _channelDetail[_index].playTimesArray)
+						{
+							var now:Date = new Date(); 
+							var nowTime:Date = new Date(0,0,0, now.hours, now.minutes, now.seconds);
+							var startTime:Date = _showUtils.getPlayTime(playtime.startTime, "00:00:00");
+							var endTime:Date = _showUtils.getPlayTime(playtime.endTime, "23:59:59");	
+							
+							if (nowTime >= startTime && nowTime < endTime)
+							{
+								matchFound = true;
+								break
+							}
+						}
+						
+						// Recall this sub and move to the bext
+						if (!matchFound)
+						{
+							playNextMedia(skippedCount++);
+							return;
+						}
+					}
+					
+					// Play the next item in the list. We'll need to prepare the objects first 				
+					switch (_channelDetail[_index].type)
+					{
+						case ChannelDetail.TYPE_MEDIA:
+							media = convertToMediasObject(_index);
+							break;
+						
+						case ChannelDetail.TYPE_OVERLAY:
+							_currentIsOverlay = true;
+							media = convertToMediasObject(_index);
+							break;
+						
+						case ChannelDetail.TYPE_GROUP:
+							media = convertToMediasObject(_index, _subIndex);
+							break;
+						
+						case ChannelDetail.TYPE_GROUP_OVERLAY:
+							media = convertToMediasObject(_index, _subIndex);
+							if (_mediaGroupOverlayCanvas == null) 
+							{ 
+								var overlayWidth:Number = parseFloat(_channelDetail[_index].width);
+								var overlayHeight:Number = parseFloat(_channelDetail[_index].height);							
+								var overlayDetail:Array = _channelDetail[_index].subDetail2;
+								var overlayDuration:int = parseInt(_channelDetail[_index].duration);
+								var overlayRect:ResizeRectangle = _imageUtils.getBestFit(overlayWidth, overlayHeight, mediaGroupOverlay.width, mediaGroupOverlay.height);
+								
+								_mediaGroupOverlayCanvas = new MediaGroupOverlayCanvas();
+								_mediaGroupOverlayCanvas.x = overlayRect.x ;
+								_mediaGroupOverlayCanvas.y = overlayRect.y;
+								_mediaGroupOverlayCanvas.width = overlayWidth;
+								_mediaGroupOverlayCanvas.height = overlayHeight;
+								_mediaGroupOverlayCanvas.scaleX = overlayRect.scaleX;
+								_mediaGroupOverlayCanvas.scaleY = overlayRect.scaleY;
+								
+								mediaGroupOverlay.addElement(_mediaGroupOverlayCanvas);
+								if (overlayDuration > 0) {_mediaGroupOverlayCanvas.addEventListener(MediaGroupOverlayCanvas.OVERLAY_COMPLETE, mediaGroupOverlayCompleteHandler);}
+								_mediaGroupOverlayCanvas.play(overlayDetail, overlayDuration, true);
+							}					
+							break;
+					}
+					
+					var rect:ResizeRectangle = _imageUtils.getBestFit(parseFloat(media.width), parseFloat(media.height), this.width, this.height);
+					
+					_lastMedia = _currentMedia;
+					_currentMedia = media;
+					
+					switch (media.mediaType)
+					{
+						case Constants.MEDIA_TYPE_IMAGE:
+							startImageDisplay(media, rect);
+							break;
+						
+						case Constants.MEDIA_TYPE_SWF:	
+							startSWFDisplay(media, rect);
+							break;
+						
+						case Constants.MEDIA_TYPE_VIDEO:
+							this.callLater(startVideoPlayer);
+							break;
+						
+						case Constants.MEDIA_TYPE_AUDIO:	
+							this.callLater(startSoundPlayer);
+							break;
+						
+					}		
+					
+					
+					_taskManager.updateScreenStatus(_channelId, _channelDetail[_index].itemName, _currentMedia.itemName);
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					
+					trace(err.message);
+					rewind();
+				}
+			}
+			
+			
+			private function swfLoaderCompleteHandler(event:Object):void
+			{
+				// What is the target? This will be called when the image is completed loader
+				// or manually when the SWF Bytes are loaded
+				var target:Object;
+				if (event is Event)
+				{
+					target = event.target;
+					_currentSwfLoader = event.target;
+					event.target.removeEventListener(Event.COMPLETE, swfLoaderCompleteHandler);
+					event.target.removeEventListener(IOErrorEvent.IO_ERROR, swfLoaderIOErrorHandler);
+				}
+				else
+				{
+					target = event;
+					_currentSwfLoader = target;
+				}
+				
+				switch (_currentMedia.effectId)
+				{
+					case EffectsManager.EFFECT_FADE:
+						var fade:Fade_ = _effectsManager.fadeIn(effectEndHandler);
+						fade.play([target]);
+						break;
+					
+					case EffectsManager.EFFECT_SPIN:
+						var spin:Parallel_ = _effectsManager.spinIn(effectEndHandler);
+						spin.play([target]);
+						break;
+					
+					case EffectsManager.EFFECT_SLIDE:
+						var slide:Parallel_ = _effectsManager.slideIn(effectEndHandler, target.width, target.x );
+						slide.play([target]);
+						break;
+					
+					default:
+						this.callLater(effectEndHandler, [null, event.target]);
+				}
+				
+				if (_currentIsOverlay) {addOverlayDetail();}				
+			}
+			
+			
+			private function swfLoaderFrameHandler(event:Event):void
+			{
+				_frameIndex ++;
+			}
+			
+			private function swfLoaderIOErrorHandler(event:IOErrorEvent):void
+			{
+				event.target.removeEventListener(Event.COMPLETE, swfLoaderCompleteHandler);
+				event.target.removeEventListener(IOErrorEvent.IO_ERROR, swfLoaderIOErrorHandler);
+				
+				_missingMedia = true;
+			}
+			
+			private function swfSecurityHandler(event:SecurityErrorEvent):void
+			{
+				LogUtils.writeToLog(event.text, LogUtils.WARN);
+				playNextMedia();
+			}
+
+			private function effectEndHandler(event:EffectEvent = null, target:Object = null):void
+			{
+				try
+				{										
+					_frameIndex = 0 ;
+					_startTime = new Date();
+					_timerMedia.start();
+					_swfTimeout.stop();
+					
+					if (_currentSwfLoader == null) {return;}
+					
+					// If this is an image take the opprotunity to clean up
+					// since the screen is idle
+					for (var i:int = 0; i < groupSwfLoaders.numElements; i++)
+					{
+						var obj:Object = groupSwfLoaders.getElementAt(i);
+						if (groupSwfLoaders.getElementAt(i) != _currentSwfLoader)
+						{
+							groupSwfLoaders.removeElementAt(i);
+						}
+					}
+					
+					System.gc();
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+				}			
+			}
+			
+			/**
+			 * MediaGroups may be randomized and/or truncated.
+			 * Perform the steps in this function. We may recall multiple times
+			 * if the Group is randomized
+			 */
+			private function getMediaGroupDetail(mediaGroupId:String):Array
+			{
+				try
+				{
+					// Find the media group
+					var mediaGroup:MediaGroups;
+					for (var i:int = 0; i < _dataManager.mediaGroups.length; i++)
+					{
+						if (_dataManager.mediaGroups[i].itemName == mediaGroupId)
+						{
+							mediaGroup = _dataManager.mediaGroups[i];
+							break;
+						}
+					}
+					
+					// If we did not find the group we have big issues
+					if (mediaGroup == null)
+					{							
+						throw new Error("Could not find itemName " + mediaGroupId + " in MediaGroups");
+					}
+					
+					// Find and sort  the matching group detail 
+					var sortField:SortField = new SortField("playOrder");
+					var filterPair:FilterPair = new FilterPair("mediaGroupId", mediaGroupId);
+					var groupDetail:Array = DataUtils.sortAndFilter(_dataManager.mediaGroupDetail, [sortField], [filterPair]);
+					
+					// Arrange accordingly
+					return _showUtils.arrangeGroup(mediaGroup, groupDetail);
+					
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+				}
+				
+				// To avoid breaking the Flick, just retunr a blank array
+				return new Array();
+			}
+			
+			private function getMediaGroupOverlayDetail(mediaId:String):Array
+			{
+				try
+				{
+					var zOrder:SortField = new SortField("z");
+					var filterPair:FilterPair= new FilterPair("overlayId", mediaId);
+					var subDetail:Array = DataUtils.sortAndFilter(_dataManager.overlayDetail, [zOrder] , [filterPair]);
+					
+					// Find the matching Media for the sub detail too
+					for each (var overlayDetail:OverlayDetail in subDetail)
+					{
+						overlayDetail.localUrl = getLocalUrl(overlayDetail.mediaId );
+					}
+
+					return subDetail;
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+				}
+				
+				return new Array();
+			}
+			
+			private function startImageDisplay(media:Medias, rect:ResizeRectangle):void
+			{
+				try
+				{
+					// Create a new SWF to play 
+					var swfLoader:SWFLoader = new SWFLoader();
+					swfLoader.autoLoad = true;
+					swfLoader.source = getLocalUrl(media.itemName);
+					swfLoader.x = rect.x;
+					swfLoader.y = rect.y;
+					swfLoader.width = rect.width;
+					swfLoader.height = rect.height;
+					swfLoader.maintainAspectRatio = false;
+					swfLoader.maintainProjectionCenter = true;
+					swfLoader.smoothBitmapContent = true;
+					
+					// Set up the overlay canvas if needed
+					if (_currentIsOverlay)
+					{
+						mediaOverlayCanvas.x = rect.x;
+						mediaOverlayCanvas.y = rect.y;
+						mediaOverlayCanvas.width = rect.width;
+						mediaOverlayCanvas.height = rect.height;
+						mediaOverlayCanvas.scaleX = rect.scaleX;
+						mediaOverlayCanvas.scaleY = rect.scaleY;
+					}
+					
+					swfLoader.addEventListener(Event.COMPLETE, swfLoaderCompleteHandler);
+					swfLoader.addEventListener(IOErrorEvent.IO_ERROR, swfLoaderIOErrorHandler);
+					swfLoader.addEventListener(Event.ENTER_FRAME, swfLoaderFrameHandler);
+					swfLoader.addEventListener(SecurityErrorEvent.SECURITY_ERROR, swfSecurityHandler);
+					
+					groupSwfLoaders.addElement(swfLoader);	
+					
+					_swfTimeout.start();		// Just in case the load, fade, etc fails
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					playNextMedia();
+				}					
+				
+			}
+			
+			private function startSWFDisplay(media:Medias, rect:ResizeRectangle):void
+			{
+				try
+				{
+					var bytes:ByteArray = new ByteArray();
+					var path:String = _appManager.mediaFolder().resolvePath(media.itemName).nativePath;
+					var file:File = new File(path);
+					var stream:FileStream = new FileStream();
+					stream.open(file, FileMode.READ);					
+					stream.readBytes(bytes, 0, stream.bytesAvailable);
+					stream.close();
+					
+					var context:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain);
+					context.allowCodeImport = true;
+					context.parameters = new Object();
+					context.parameters[PlayerConstants.QUERYSTRING_STATE] = escape(_dataManager.screen_.state);
+					context.parameters[PlayerConstants.QUERYSTRING_ZIP] = escape(_dataManager.screen_.zip);
+					context.parameters[PlayerConstants.QUERYSTRING_ID] = escape(_dataManager.screen_.itemName);
+					
+					var loader:Loader_ = new Loader_();
+					loader.media = media;
+					loader.resizeRect = rect;	
+					loader.contentLoaderInfo.addEventListener(Event.COMPLETE, contentCompleteHandler);
+					loader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR, contentIOErrorHandler);
+					loader.loadBytes(bytes, context);					
+
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					playNextMedia();
+				}
+			}
+			
+			private function contentCompleteHandler(event:Event):void
+			{
+				try
+				{
+					event.target.removeEventListener(Event.COMPLETE, contentCompleteHandler);
+					event.target.removeEventListener(IOErrorEvent.IO_ERROR, contentIOErrorHandler);
+					
+					var loader:Loader_ = event.target.loader as Loader_;
+					//loader.scaleX = this.width / loader.media.widthNumber;
+					//loader.scaleY = this.height / loader.media.heightNumber;
+					
+					var sprite:SpriteVisualElement = new SpriteVisualElement();
+					sprite.x = loader.resizeRect.x;
+					sprite.y = loader.resizeRect.y;
+					sprite.width = loader.resizeRect.width;
+					sprite.height = loader.resizeRect.height;
+					sprite.addChild(loader);
+					
+					groupSwfLoaders.addElement(sprite);
+					
+					// Reuze the SWFLoader logic to play the fade
+					swfLoaderCompleteHandler(sprite);
+
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					playNextMedia();
+				}
+			}
+
+			private function contentIOErrorHandler(event:Event):void
+			{
+				var target:String = "";
+				try
+				{
+					target = event.target.media.name;	
+					event.target.removeEventListener(Event.COMPLETE, contentCompleteHandler);
+					event.target.removeEventListener(IOErrorEvent.IO_ERROR, contentIOErrorHandler);
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);	
+				}
+				
+				LogUtils.writeToLog("Could not loader " + target, LogUtils.WARN);
+				playNextMedia()				
+			}
+
+			private function startVideoPlayer(event:Event = null):void
+			{
+				// Remove the SWFLoader Layer and clean up'
+				groupSwfLoaders.removeAllElements();
+				
+				// Get the binding rectangle. 
+				// Note, we may have to override the video size if the aspect is Full
+				var resizeRect:ResizeRectangle = _imageUtilsVid.getBestFit(parseFloat(_currentMedia.width), parseFloat(_currentMedia.height), this.width, this.height);
+				var rect:Rectangle = new Rectangle(resizeRect.x, resizeRect.y, resizeRect.width, resizeRect.height);
+				
+				var url:String;				
+				var stream:Boolean = _currentMedia.stream == "1";
+				if (stream)
+				{
+					/*
+					url = _appManager.cf.createPrivateUrl(_dataManager.accountHdr.streamDomain, 
+					_currentMedia.itemName, _currentMedia.mimeType,
+					_dataManager.settingsHdr.decryptedKeyPair, _dataManager.settingsHdr.decryptedKeyPairId);
+					*/
+				}
+				else
+				{
+					url = getLocalUrl(_currentMedia.itemName);
+				}
+				
+				if (_videoCanvas == null)
+				{
+					_videoCanvas = new VideoCanvas();
+					_videoCanvas.videoRect = rect;
+					_videoCanvas.debugMode = _dataManager.screenSettings.videoDebug;
+					_videoCanvas.useAccel = _dataManager.screenSettings.useAccel && _appManager.isAccelerated;
+					_videoCanvas.addEventListener(VideoCanvas.VIDEO_END, videoEndHandler);
+					groupVideo.addElement(_videoCanvas);
+				}				
+				_videoCanvas.play(url);
+				
+				// Set up the canvas just in case this is an overlay
+				if (_currentIsOverlay)
+				{
+					mediaOverlayCanvas.x = resizeRect.x;
+					mediaOverlayCanvas.y = resizeRect.y;
+					mediaOverlayCanvas.width = resizeRect.width;
+					mediaOverlayCanvas.height = resizeRect.height;
+					mediaOverlayCanvas.scaleX = resizeRect.scaleX;
+					mediaOverlayCanvas.scaleY = resizeRect.scaleY;		
+					
+					addOverlayDetail();
+				}
+				
+				_startTime = new Date();
+				_timerMedia.start();
+			}
+			
+			private function videoEndHandler(event:Event):void
+			{
+				_missingMedia = _videoCanvas.missingMedia;	// If the media is missing, it will be skipped over
+				
+				playNextMedia();					
+			}
+
+			private function startSoundPlayer(event:Event = null):void
+			{
+				// Remove the SWFLoader Layer and clean up'
+				groupSwfLoaders.removeAllElements();
+				
+				var url:String = getLocalUrl(_currentMedia.itemName);
+				_soundPlayer = new SoundPlayer(url);
+				_soundPlayer.addEventListener(SoundPlayer.SOUND_START, soundStartHandler);
+				_soundPlayer.addEventListener(SoundPlayer.SOUND_END, soundEndHandler);
+				_soundPlayer.play();
+			}
+			
+			private function soundStartHandler(event:Event):void
+			{
+				_soundPlayer.removeEventListener(SoundPlayer.SOUND_START, soundStartHandler);
+				_startTime = new Date();
+				_timerMedia.start();
+			}
+			
+			private function soundEndHandler(event:Event):void
+			{
+				_soundPlayer.removeEventListener(SoundPlayer.SOUND_END, soundEndHandler);
+				_soundPlayer = null;
+				playNextMedia();					
+			}
+			
+			private function mediaGroupOverlayCompleteHandler(event:Event):void
+			{
+				// Rerun the next Next Media Routine, 
+				// and force it to continue
+				
+				_subIndex = int.MAX_VALUE / 2; 	//I doubt anyone has a show with 1,073,741,824 items
+				playNextMedia();
+			}
+			
+			private function addOverlayDetail():void
+			{
+				mediaOverlayCanvas.removeAllElements();
+				
+				// Get the correct subDetail array
+				// It will differ if this is a Media Group Overlay
+				var subDetail:Array = _channelDetail[_index].type == ChannelDetail.TYPE_GROUP_OVERLAY ?
+					                  _channelDetail[_index].subDetail2 : _channelDetail[_index].subDetail; 
+				
+				for each (var detail:OverlayDetail in subDetail)
+				{
+					if (detail.type != OverlayDetail.TYPE_BASE)
+					{
+						switch (detail.type)
+						{
+							case OverlayDetail.TYPE_TEXT:
+								var text:OverlayDisplayText = new OverlayDisplayText();
+								text.overlayDetail = detail;
+								
+								text.text = detail.text;
+								text.x = parseFloat(detail.x);
+								text.y = parseFloat(detail.y);
+								text.width = parseFloat(detail.width);
+								text.height = parseFloat(detail.height);
+								text.rotation = parseFloat(detail.rotate);
+								text.alpha =  parseFloat(detail.alpha);
+								text.setStyle("color", "#" + detail.color);
+								text.setStyle("fontFamily", detail.fontFamily);
+								text.setStyle("fontSize", detail.fontSize);
+								text.setStyle("fontStyle", detail.fontStyle);
+								text.setStyle("fontWeight", detail.fontWeight);
+								text.setStyle("textDecoration", detail.textDecoration);
+								text.filters = detail.filters;
+								text.visible = false;	// The controll will set back to visible
+								
+								mediaOverlayCanvas.addElement(text);
+								break;
+							
+							case OverlayDetail.TYPE_MEDIA:
+								if (detail.isImage || detail.isSWF)
+								{							
+									var swf:OverlayDisplaySWF = new OverlayDisplaySWF();
+									swf.overlayDetail = detail;
+									swf.x = parseFloat(detail.x);
+									swf.y = parseFloat(detail.y);
+									swf.width = parseFloat(detail.width);
+									swf.height = parseFloat(detail.height);
+									swf.rotation = parseFloat(detail.rotate);
+									swf.alpha =  parseFloat(detail.alpha);			
+									swf.filters = detail.filters;
+									mediaOverlayCanvas.addElement(swf);
+								}
+								else if (detail.isVideo)
+								{
+									var vid:OverlayDisplayVideo = new OverlayDisplayVideo();
+									vid.overlayDetail = detail;
+									vid.x = parseFloat(detail.x);
+									vid.y = parseFloat(detail.y);
+									vid.width = parseFloat(detail.width);
+									vid.height = parseFloat(detail.height);
+									vid.filters = detail.filters;
+									mediaOverlayCanvas.addElement(vid);
+								}
+								else if (detail.isAudio)
+								{
+									var aud:OverlayDisplayAudio = new OverlayDisplayAudio();
+									aud.overlayDetail = detail;
+									
+									mediaOverlayCanvas.addElement(aud);
+								}	
+								break;
+						}
+					}
+				}				
+			}
+			
+			private function convertToMediasObject(index:int, subIndex:int = 0):Medias
+			{
+				var media:Medias = null;
+				
+				switch (_channelDetail[index].type)
+				{
+					case ChannelDetail.TYPE_MEDIA:
+						media = Utils.copyClassObject(Medias, _channelDetail[index]);
+						media.itemName = _channelDetail[index].mediaId;
+						break;
+					
+					case ChannelDetail.TYPE_OVERLAY:
+						// Create a new Item
+						media = _dataManager.getMedia(_channelDetail[index].firstMediaId);
+						media.width = _channelDetail[index].width;
+						media.height = _channelDetail[index].height;
+						
+						// Check for a valid duration. 
+						media.duration = _channelDetail[index].duration;
+						if (parseInt(media.duration) == 0 && media.mimeType.indexOf("video") >= 0)
+						{
+							media.duration = Constants.DEFAULT_DURATION.toString();
+						}
+						break;
+					
+					case ChannelDetail.TYPE_GROUP:
+					case ChannelDetail.TYPE_GROUP_OVERLAY:	
+						media = Utils.copyClassObject(Medias, _channelDetail[index]);
+						media.name = _channelDetail[index].subDetail[subIndex].name;
+						media.itemName = _channelDetail[index].subDetail[subIndex].mediaId;
+						media.duration = _channelDetail[index].subDetail[subIndex].duration;
+						media.frames = _channelDetail[index].subDetail[subIndex].frames;
+						media.mimeType = _channelDetail[index].subDetail[subIndex].mimeType;
+						media.width = _channelDetail[index].subDetail[subIndex].width;
+						media.height = _channelDetail[index].subDetail[subIndex].height;
+						media.effectId = _channelDetail[index].subDetail[subIndex].effectId;
+						break;
+				}
+				
+				return media;
+			}
+
+			
+			private function getLocalUrl(mediaId:String, appendQueryStrings:Boolean = false):String
+			{
+				var url:String =  _appManager.mediaFolder().url + "/" +  mediaId;
+				
+				// Append the querystring to url
+				// This is usually a SWF
+				if (appendQueryStrings)
+				{
+					url += "?" + PlayerConstants.QUERYSTRING_STATE  + "=" + escape(_dataManager.screen_.state);
+					url += "&" + PlayerConstants.QUERYSTRING_ZIP  + "=" + escape(_dataManager.screen_.zip);
+					url += "&" + PlayerConstants.QUERYSTRING_ID  + "=" + escape(_dataManager.screen_.itemName);
+				}
+				
+				return url;
+			}
+
+			
+			private function filterChannelDetail(item:Object):Boolean
+			{
+				return (item.audioTrack != "1" &&  item.channelOverlay != "1");
+			}
+			
+			private function filterAudioDetail(item:Object):Boolean
+			{
+				return item.audioTrack == "1"; 
+			}
+			
+			private function filterOverlayDetail(item:Object):Boolean
+			{
+				return item.channelOverlay == "1"; 
+			}
+
+
+		]]>
+	</fx:Script>
+	<s:Group width="100%" height="100%">
+		<s:Group id="groupVideo" height="100%" width="100%" />
+		<s:Group id="groupSwfLoaders" height="100%" width="100%" />
+		<s:Group id="groupOverlay" width="100%" height="100%"  clipAndEnableScrolling="true" >
+			<s:Group id="mediaOverlayCanvas" />
+		</s:Group>
+
+		<!-- Create the canvas needed for the Media Group Overlays -->
+		<s:Group id="mediaGroupOverlay" width="100%" height="100%"  clipAndEnableScrolling="true" >	
+			<!-- only used for Media Group Overlays. Not Media Overlays -->
+		</s:Group>
+		
+		<components:ChannelOverlayCanvas id="channelOverlayCanvas" viewMode="{_viewMode}" clipAndEnableScrolling="false" />
+	</s:Group>
+</s:Group>

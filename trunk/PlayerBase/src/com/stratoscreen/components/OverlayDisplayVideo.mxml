@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="creationCompleteHandler(event)" 
+		 removedFromStage="removedFromStageHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			import com.stratoscreen.utils.ImageUtils;
+			
+			import mx.events.FlexEvent;
+			
+			import spark.components.Group;
+			
+			private static const CYCLES_PER_SECOND:int = 3;		// Keep as low as possible 
+			
+			[Bindable] private var _overlayDetail:OverlayDetail;
+			
+			private var _startTime:int;
+			private var _endTime:int;
+			private var _timer:Timer = null;		
+			private var _loadSubmitted:Boolean = false;
+			
+			public var paused:Boolean;		// Required, but not used
+			public var currentFrame:int;	// This is not used by the video but required by the parent
+			
+			public function get overlayDetail():OverlayDetail
+			{
+				return _overlayDetail;
+			}
+			
+			public function set overlayDetail(value:OverlayDetail):void
+			{
+				_overlayDetail = value;
+				
+				// Create the timers if needed
+				_startTime = parseInt(_overlayDetail.startTime);
+				_endTime = parseInt(_overlayDetail.endTime);
+				
+				// Watch for instance where the start is added but not the end
+				if (_startTime > 0 && _endTime == 0) {_endTime = int.MAX_VALUE;}
+				
+				if (_startTime > 0 || _endTime > 0)
+				{
+					var delay:Number = 1000 / CYCLES_PER_SECOND;
+					
+					_timer = new Timer(delay);
+					_timer.addEventListener(TimerEvent.TIMER, timerHandler)
+				}				
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				videoDisplay.addEventListener("complete", videoCompleteHandler);
+				
+				var startVisible:Boolean = false;
+								
+				if (_timer == null) {startVisible = true;}
+				startVisible = _startTime == 0;
+				
+				if (_timer != null) {_timer.start();}
+				this.visible = startVisible;
+				
+				if (startVisible) 
+				{
+					videoDisplay.source = _overlayDetail.localUrl;
+					videoDisplay.play();
+					_loadSubmitted = true;
+				}
+				
+				this.filters = _overlayDetail.filters;
+			}
+			
+			protected function removedFromStageHandler(event:Event):void
+			{
+				this.removeAllElements();
+			}
+			
+			private function timerHandler(event:TimerEvent):void
+			{
+				var secondsElapsed:int = _timer.currentCount / CYCLES_PER_SECOND;
+				
+				if (secondsElapsed >= _startTime && !_loadSubmitted) 
+				{
+					videoDisplay.source = _overlayDetail.localUrl;
+					videoDisplay.play();
+					_loadSubmitted = true;
+				}
+				
+				if (secondsElapsed >= _endTime) 
+				{
+					_timer.stop();
+					videoCompleteHandler(null);
+				}
+			}	
+			
+			
+			private function videoCompleteHandler(event:Event):void
+			{
+				this.removeAllElements();
+			}
+			
+			
+		]]>
+	</fx:Script>
+	<s:VideoDisplay id="videoDisplay" height="100%" width="100%" maintainProjectionCenter="true" />
+</s:Group>

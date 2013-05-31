@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					   xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:view="com.stratoscreen.view.*" 
+					   showStatusBar="false" width="100%" height="100%" minWidth="640" minHeight="480"   >
+	<fx:Style source="/assets/css/style.css"/>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.model.domains.Screens;
+
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.DataManager;
+			import com.stratoscreen.managers.TaskManager;
+			
+			private var _appManager:AppManager;
+			private var _dataManager:DataManager;
+			private var _taskManager:TaskManager;
+			
+			private const THIS_TYPE:String = Screens.DEVICE_PC;
+			
+			public function get deviceType():String
+			{
+				return THIS_TYPE;
+			}
+			
+			public function get appManager():AppManager
+			{
+				return _appManager;
+			}
+			
+			public function get dataManager():DataManager
+			{
+				return _dataManager;
+			}
+			
+			public function get taskManager():TaskManager
+			{
+				return _taskManager;
+			}
+
+			/** 
+			 * The entire appwill refer to the parent for the Managers.
+			 *  
+			 * Allow a different process to create the managers
+			 */  
+			public function setManagers(appManager:AppManager, dataManager:DataManager,  taskManager:TaskManager):void
+			{
+				_appManager = appManager;
+				_dataManager = dataManager;
+				_taskManager = taskManager;
+					
+			}
+
+		]]>
+	</fx:Script>
+	<view:PlayerControl width="100%" height="100%" />
+</s:WindowedApplication>
