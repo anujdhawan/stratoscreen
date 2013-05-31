@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+	<name>PlayerAir</name>
+	<comment></comment>
+	<projects>
+	</projects>
+	<buildSpec>
+		<buildCommand>
+			<name>com.adobe.flexbuilder.project.flexbuilder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+		<buildCommand>
+			<name>com.adobe.flexbuilder.project.apollobuilder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+	</buildSpec>
+	<natures>
+		<nature>com.adobe.flexbuilder.project.apollonature</nature>
+		<nature>com.adobe.flexbuilder.project.flexnature</nature>
+		<nature>com.adobe.flexbuilder.project.actionscriptnature</nature>
+	</natures>
+	<linkedResources>
+		<link>
+			<name>[source path] PlayerBase-src</name>
+			<type>2</type>
+			<locationURI>DOCUMENTS/PlayerBase/src</locationURI>
+		</link>
+		<link>
+			<name>[source path] Shared-src</name>
+			<type>2</type>
+			<locationURI>DOCUMENTS/Shared/src</locationURI>
+		</link>
+	</linkedResources>
+</projectDescription>
