@@ -1,0 +1,8 @@
+<ErrorResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">
+  <Error>
+    <Type>Sender</Type>
+    <Code>EntityAlreadyExists</Code>
+    <Message>User with name stratoScreenAdmin already exists.</Message>
+  </Error>
+  <RequestId>6996d996-1c06-11e0-bf4e-673ac4a5c084</RequestId>
+</ErrorResponse>

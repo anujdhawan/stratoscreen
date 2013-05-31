@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:RichText xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			xmlns:mx="library://ns.adobe.com/flex/mx" showEffect="{fadeIn}" hideEffect="{fadeOut}" 
+			preinitialize="preinitializeHandler(event)" creationComplete="creationCompleteHandler(event)" 
+			removedFromStage="removedFromStageHandler(event)"  >
+	<fx:Declarations>
+		<s:Fade id="fadeIn" duration="333" alphaFrom="0" alphaTo="{this.alpha}" />
+		<s:Fade id="fadeOut" duration="333" alphaFrom="{this.alpha}" alphaTo="0" />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.EffectsManager;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			
+			import mx.events.FlexEvent;
+			
+			private static const CYCLES_PER_SECOND:int = 3;		// Keep as low as possible 
+			
+			[Bindable] private var _overlayDetail:OverlayDetail;
+			
+			private var _effectsManager:EffectsManager;
+			private var _startTime:int;
+			private var _endTime:int;
+			private var _startFrame:int;
+			private var _endFrame:int;
+			private var _timer:Timer = null;			
+			private var _paused:Boolean;
+			private var _useFrameCount:Boolean;
+			private var _effectOut:Object;
+			private var effectInPlayed:Boolean = false;
+
+			public var currentFrame:int;
+			
+			protected function preinitializeHandler(event:FlexEvent):void
+			{		
+				_effectsManager = new EffectsManager();
+			}
+
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				var startVisible:Boolean = false;
+				_useFrameCount = _overlayDetail.endFrame != "0";
+				
+				this.filters = _overlayDetail.filters;
+				
+				if (_useFrameCount)
+				{
+					startVisible = _startFrame == 0;
+				}
+				else
+				{
+					startVisible = _startTime == 0;
+				}				
+				
+				if (startVisible)
+				{
+					playEffectIn();
+				}
+				else
+				{
+					_timer.start();
+				}
+			}
+
+			protected function removedFromStageHandler(event:Event):void
+			{
+				if (_timer != null) {_timer.stop();} // Watch for lingering timers
+			}
+
+			public function get paused():Boolean
+			{
+				return _paused;
+			}
+			
+			public function set paused(value:Boolean):void
+			{
+				_paused = value;		
+				if (_timer == null) {return;}
+				_paused ?  _timer.stop() : _timer.start(); 
+			}
+			
+			public function get overlayDetail():OverlayDetail
+			{
+				return _overlayDetail;
+			}
+
+			public function set overlayDetail(value:OverlayDetail):void
+			{
+				_overlayDetail = value;
+				
+				// Create the timers if needed
+				_startTime = parseInt(_overlayDetail.startTime);
+				_endTime = parseInt(_overlayDetail.endTime);
+				_startFrame = parseInt(_overlayDetail.startFrame);
+				_endFrame = parseInt(_overlayDetail.endFrame);
+				
+				if (_startTime > 0 || _endTime > 0 || _startFrame > 0 || _endFrame > 0)
+				{
+					var delay:Number = 1000 / CYCLES_PER_SECOND;
+					
+					_timer = new Timer(delay);
+					_timer.addEventListener(TimerEvent.TIMER, timerHandler);
+					
+					// Adjust the end times if not passed
+					if (_endTime == 0) {_endTime = int.MAX_VALUE;}
+					if (_endFrame == 0) {_endFrame = int.MAX_VALUE;}
+				}		
+				
+				_useFrameCount =  (_startFrame > 0 && _endFrame > 0); 
+			}
+			
+			private function timerHandler(event:TimerEvent):void
+			{
+				var secondsElapsed:int = _timer.currentCount / CYCLES_PER_SECOND;
+				
+				// Hide or show depandant on the time
+				if (_useFrameCount)
+				{
+					if (this.currentFrame >= _startFrame && !effectInPlayed) 
+					{
+						effectInPlayed = true;
+						playEffectIn();
+					}							
+					if (this.currentFrame >= _endFrame) {playEffectOut();}
+				}				
+				else
+				{
+					if (secondsElapsed >= _startTime && !effectInPlayed) 
+					{
+						effectInPlayed = true;
+						playEffectIn();
+					}					
+					if (secondsElapsed >= _endTime) {playEffectOut();}
+				}
+			}
+
+			private function playEffectIn():void
+			{
+				// Play the effects
+				var detailAlpha:Number = parseFloat(_overlayDetail.alpha);
+				var detailRotate:Number = parseFloat(_overlayDetail.rotate);
+				switch (overlayDetail.effectId)
+				{
+					case EffectsManager.EFFECT_FADE:
+						var fade:Fade = _effectsManager.fadeIn(effectInEndHandler, 0, detailAlpha);
+						_effectOut = _effectsManager.fadeOut(effectOutEndHandler, detailAlpha, 0);
+						fade.play([this]);
+						break;
+					
+					case EffectsManager.EFFECT_SPIN:
+						var spin:Parallel = _effectsManager.spinIn(effectInEndHandler, 360 + detailRotate, detailRotate, 0, detailAlpha);
+						_effectOut = _effectsManager.spinOut(effectOutEndHandler, detailRotate, 360 + detailRotate, detailAlpha, 0);
+						spin.play([this]);
+						break;
+					
+					case EffectsManager.EFFECT_SLIDE:
+						var detailX:Number = parseFloat(overlayDetail.x);
+						var detailWidth:Number = parseFloat(overlayDetail.width);
+						var slide:Parallel = _effectsManager.slideIn(effectInEndHandler, detailX - detailWidth, detailX, 0, detailAlpha);
+						_effectOut = _effectsManager.slideOut(effectOutEndHandler, detailX, detailX - detailWidth, detailAlpha, 0 );
+						slide.play([this]);
+						break;
+					
+					default:
+						_effectOut = null;
+						this.visible = true;
+						this.callLater(effectInEndHandler);
+				}
+			}
+			
+			private function playEffectOut():void
+			{
+				_timer.stop();
+				
+				if (_effectOut == null)
+				{
+					this.visible = false;
+					this.callLater(effectOutEndHandler);
+				}
+				else
+				{
+					// Play the opposite efect
+					_effectOut.play([this]);
+				}				
+			}
+			
+			protected function effectInEndHandler(event:Event = null):void
+			{
+			}
+			
+			protected function effectOutEndHandler(event:Event = null):void
+			{
+			}
+			
+		]]>
+	</fx:Script>
+</s:RichText>

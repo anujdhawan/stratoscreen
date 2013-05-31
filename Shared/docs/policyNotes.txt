@@ -1,0 +1,25 @@
+
+
+Sample S3 Policy
+{
+  "Id": "Policy1296492059771",
+  "Statement": [
+    {
+      "Sid": "Stmt1296492055931",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:PutBucketPolicy",
+        "s3:PutObject"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:s3:::bucket/*",
+      "Principal": {
+        "AWS": [
+          "aen:aws:iam::123456789012:user"
+        ]
+      }
+    }
+  ]
+}

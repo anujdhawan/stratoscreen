@@ -1,0 +1,158 @@
+
+@namespace s "library://ns.adobe.com/flex/spark";
+
+@font-face 
+{
+	src:url("/assets/fonts/arial.ttf");
+	fontFamily: "arialEmbed";
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/arialbd.ttf");
+	fontFamily: "arialEmbed";
+	fontWeight: bold;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/ariali.ttf");
+	fontFamily: "arialEmbed";
+	fontStyle: italic;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/arialbi.ttf");
+	fontFamily: "arialEmbed";
+	fontWeight: bold;
+	fontStyle: italic;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+/*---------------------------*/
+
+@font-face 
+{
+	src:url("/assets/fonts/cour.ttf");
+	fontFamily: "courierEmbed";
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/courbd.ttf");
+	fontFamily: "courierEmbed";
+	fontWeight: bold;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/couri.ttf");
+	fontFamily: "courierEmbed";
+	fontStyle: italic;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/courbi.ttf");
+	fontFamily: "courierEmbed";
+	fontWeight: bold;
+	fontStyle: italic;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+/*---------------------------*/
+
+@font-face 
+{
+	src:url("/assets/fonts/times.ttf");
+	fontFamily: "timesRomanEmbed";
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/timesbd.ttf");
+	fontFamily: "timesRomanEmbed";
+	fontWeight: bold;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/timesi.ttf");
+	fontFamily: "timesRomanEmbed";
+	fontStyle: italic;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/timesbi.ttf");
+	fontFamily: "timesRomanEmbed";
+	fontWeight: bold;
+	fontStyle: italic;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+/*---------------------------*/
+
+@font-face 
+{
+	src:url("/assets/fonts/verdana.ttf");
+	fontFamily: "verdanaEmbed";
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/verdanab.ttf");
+	fontFamily: "verdanaEmbed";
+	fontWeight: bold;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/verdanai.ttf");
+	fontFamily: "verdanaEmbed";
+	fontStyle: italic;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+@font-face 
+{
+	src:url("/assets/fonts/verdanaz.ttf");
+	fontFamily: "verdanaEmbed";
+	fontStyle: italic;
+	fontWeight: bold;
+	unicodeRange: U+0020-U+007E; 
+	embedAsCFF: true;
+}
+
+/*---------------------------*/
+
+
+
+

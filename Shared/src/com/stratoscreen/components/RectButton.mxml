@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark"
+		 width="90" height="30" buttonMode="true"  creationComplete="creationCompleteHandler(event)"
+		 mouseOver="mouseOverHandler(event)" mouseOut="mouseOutHandler(event)" click="clickHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			
+			import spark.filters.GlowFilter;
+			
+			[Bindable] public var borderColor:uint = 0x3E63C1;
+			[Bindable] public var outerColor:uint = 0x9DB6E1;
+			[Bindable] public var innerColor:uint = 0xC4D3ED;
+				
+			[Bindable] private var _enabled:Boolean = true;
+			[Bindable] private var _label:String = "OK";
+			private var _clickHandler:Function = null;
+			private var _glowFilter:spark.filters.GlowFilter;			
+			private var _executeLetter:String;
+			
+			public override function set enabled(value:Boolean):void
+			{
+				super.enabled = value;				
+				_enabled = value;
+				
+				if (rectBtn == null) {return;}	// Still rendering
+				
+				this.alpha = _enabled ? 1: .33;			
+			}
+			
+			public function set label(value:String):void
+			{
+				_label = value;
+			}
+			
+			public function get label():String
+			{
+				return _label;
+			}
+			
+			public function get executeLetter():String
+			{
+				return _executeLetter;
+			}
+			
+			public function set executeLetter(value:String):void
+			{
+				_executeLetter = value;
+				
+				if (rectBtn == null) {return;}	// Still rendering				
+				
+				var index:int = _label.indexOf(_executeLetter);
+				if (index < 0)
+				{
+					lblLeft.text = _label
+				}
+				else
+				{
+					lblLeft.text = _label.substr(0, index);
+					lblMid.text = _executeLetter;
+					lblRight.text = _label.substr(index + 1, _label.length - (index + 1));
+				}	
+				
+				// Adjust the empty label sizes
+				if (lblLeft.text == "") {lblLeft.width = 0;}
+				if (lblMid.text == "") {lblMid.width = 0;}
+				if (lblRight.text == "") {lblRight.width = 0;}
+				
+			}
+			
+			private function keyPressHandler(event:KeyboardEvent):void
+			{
+				if (event.charCode == _executeLetter.charCodeAt(0) ||
+					event.charCode == _executeLetter.toLowerCase().charCodeAt(0))
+				{
+					clickHandler(null);
+				}
+			}
+
+			
+			public function set onClick(value:Function):void
+			{
+				_clickHandler = value;
+			}
+
+			public function get onClick():Function
+			{
+				return _clickHandler;
+			}
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_glowFilter = new spark.filters.GlowFilter();
+				_glowFilter.color = innerColor;
+				_glowFilter.blurX = 15;
+				_glowFilter.blurY = 15;
+					
+				this.enabled = _enabled;	// Complete the creation of the components
+				this.label = _label;	
+				this.executeLetter = _executeLetter;
+				
+				// Add the event listener too
+				this.parentApplication.addEventListener(KeyboardEvent.KEY_DOWN, keyPressHandler);
+			}
+
+
+			protected function mouseOverHandler(event:MouseEvent):void
+			{
+				this.filters = [_glowFilter];
+				gradUpper.color = innerColor;
+				gradLower.color = innerColor;
+			}
+
+
+			protected function mouseOutHandler(event:MouseEvent):void
+			{
+				this.filters = [];
+				gradUpper.color = outerColor;
+				gradLower.color = outerColor;
+			}
+
+
+			protected function clickHandler(event:MouseEvent):void
+			{
+				if (_enabled && _clickHandler != null) {_clickHandler();} 
+			}
+
+
+		]]>
+	</fx:Script>
+	<s:Rect id="rectBtn" width="100%" height="100%">
+		<s:stroke>
+			<s:SolidColorStroke id="border" color="{borderColor}" weight="1"/>
+		</s:stroke>       
+		<s:fill>
+			<s:LinearGradient rotation="90">
+				<s:GradientEntry id="gradUpper" color="{outerColor}" />
+				<s:GradientEntry color="{innerColor}" />
+				<s:GradientEntry id="gradLower" color="{outerColor}" />
+			</s:LinearGradient>
+		</s:fill>		
+	</s:Rect>
+	<s:HGroup verticalCenter="1" gap="0" verticalAlign="middle" horizontalCenter="0">
+		<s:Label id="lblLeft" text=""  fontSize="14" fontFamily="Arial"  textAlign="right" fontWeight="bold"/>
+		<s:Label id="lblMid"  text="" fontSize="14" fontFamily="Arial"  textAlign="center" textDecoration="underline" fontWeight="bold"/>
+		<s:Label id="lblRight" text=""  fontSize="14" fontFamily="Arial"  textAlign="left" fontWeight="bold"/>
+	</s:HGroup>
+</s:Group>

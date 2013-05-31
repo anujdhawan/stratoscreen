@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="creationCompleteHandler(event)" removedFromStage="removedFromStageHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.model.domains.OverlayDetail;
+			
+			import mx.events.FlexEvent;
+			
+			import org.osmf.display.ScaleMode;
+			import org.osmf.events.MediaPlayerStateChangeEvent;
+			import org.osmf.media.MediaPlayerState;
+			
+			private static const CYCLES_PER_SECOND:int = 3;		// Keep as low as possible 
+			
+			[Bindable] private var _overlayDetail:OverlayDetail;
+			
+			private var _startTime:int;
+			private var _endTime:int;
+			private var _timer:Timer = null;		
+			private var _loadSubmitted:Boolean = false;
+			private var _soundPlayer:SoundPlayer;
+						
+			public var paused:Boolean;		// Required, but not used		
+			public var currentFrame:int;	// This is not used by the video but required by the parent
+			
+			public function get overlayDetail():OverlayDetail
+			{
+				return _overlayDetail;
+			}
+			
+			public function set overlayDetail(value:OverlayDetail):void
+			{
+				_overlayDetail = value;
+				
+				// Create the timers if needed
+				_startTime = parseInt(_overlayDetail.startTime);
+				_endTime = parseInt(_overlayDetail.endTime);
+				
+				// Watch for instance where the start is added but not the end
+				if (_startTime > 0 && _endTime == 0) {_endTime = int.MAX_VALUE;}
+				
+				if (_startTime > 0 || _endTime > 0)
+				{
+					var delay:Number = 1000 / CYCLES_PER_SECOND;
+					
+					_timer = new Timer(delay);
+					_timer.addEventListener(TimerEvent.TIMER, timerHandler)
+				}				
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_soundPlayer = new SoundPlayer(_overlayDetail.localUrl);
+				_soundPlayer.addEventListener(SoundPlayer.SOUND_START, soundStartHandler);
+				_soundPlayer.addEventListener(SoundPlayer.SOUND_END, soundEndHandler);
+				
+				var startOnStart:Boolean = false;
+				
+				if (_timer == null) {startOnStart = true;}
+				startOnStart = _startTime == 0;
+				
+				if (_timer != null) {_timer.start();}
+				this.visible = startOnStart;
+				
+				if (startOnStart) 
+				{
+					_soundPlayer.play();
+					_loadSubmitted = true;
+				}
+				
+			}
+			
+			protected function removedFromStageHandler(event:Event):void
+			{
+				if(_timer != null) {_timer.stop();}
+				
+				_soundPlayer.stop();
+				_soundPlayer.removeEventListener(SoundPlayer.SOUND_START, soundStartHandler);
+				_soundPlayer.removeEventListener(SoundPlayer.SOUND_END, soundEndHandler);
+				_soundPlayer = null;
+
+				this.removeAllElements();
+			}
+			
+			private function timerHandler(event:TimerEvent):void
+			{
+				var secondsElapsed:int = _timer.currentCount / CYCLES_PER_SECOND;
+				
+				if (secondsElapsed >= _startTime && !_loadSubmitted) 
+				{
+					this.visible = true;
+					_soundPlayer.play();
+					_loadSubmitted = true;
+				}
+				
+				if (secondsElapsed >= _endTime) 
+				{
+					_timer.stop();
+					_soundPlayer.stop();
+					this.visible = false;
+				}
+			}	
+			
+			private function soundStartHandler(event:Event):void
+			{
+			}
+			
+			private function soundEndHandler(event:Event):void
+			{
+			}
+			
+		]]>
+	</fx:Script>
+	
+</s:Group>
