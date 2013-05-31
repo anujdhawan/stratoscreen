@@ -1,8 +1,7 @@
-#summary Obfuscate the SWC to avoid decompilation.
+#summary Use the obfuscated SWC to avoid decompilation.
 
 = Use the CoreAir_secure.swc when compiling =
 
 To avoid decompilation of the AIR application, you can use the obfuscated Actionscript library. Including this library will cause most decompilers to crash. 
 
 [http://s3.amazonaws.com/stratoscreen/CoreAir_secure.swc CoreAir_secure.swc]
-
