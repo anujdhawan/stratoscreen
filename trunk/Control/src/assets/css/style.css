@@ -1,0 +1,135 @@
+/* CSS file */
+@namespace s "library://ns.adobe.com/flex/spark";
+@namespace mx "library://ns.adobe.com/flex/mx";
+
+global
+{
+	chromeColor: #C4D3ED;
+	focusColor: #9DB6E1;
+	fontFamily: Verdana;
+	fontSize: 10;
+	color: #404040;
+	symbol-color: #404040;
+}
+
+mx|Alert
+{
+	chromeColor: #B1C5E7;
+}
+
+
+s|Button
+{
+	chromeColor: #C4D3ED;
+	focusColor: #9DB6E1;
+	fontWeight: bold;
+	skinClass: ClassReference("com.stratoscreen.skins.Button");
+}
+
+s|TextInput
+{
+	fontFamily: Verdana;
+	fontSize: 10;
+}
+
+s|Label
+{
+	color: #404040;
+	fontSize: 10;
+	verticalAlign: middle;
+}
+
+s|Panel
+{
+	chromeColor: #8FB4FF;
+}
+
+s|Panel #titleDisplay 
+{
+	color: #FFFFFF;	
+}
+
+s|Panel.Home
+{
+	cornerRadius: 6;
+	dropShadowVisible: false;
+	borderColor: #808080;		
+}
+
+mx|LinkButton
+{
+	textAlign: left;
+}
+s|CheckBox
+{
+	fontStyle: italic;
+	fontWeight: normal;
+}
+
+s|TitleWindow
+{
+	borderColor: #808080;
+}
+
+s|BorderContainer.Main
+{
+	borderColor: #808080;
+	cornerRadius: 6;
+}
+s|BorderContainer.TabButtonSelected
+{
+	backgroundColor: #FFFFFF;
+	borderColor: #808080;
+	cornerRadius: 4;
+}
+
+s|Label.TabButtonSelected
+{
+	fontSize: 11;
+	fontWeight: bold;
+	textAlign: center;
+}
+s|BorderContainer.TabButtonUnselected
+{
+	backgroundColor: #9DB6E1;
+	borderColor: #808080;
+	cornerRadius: 4;
+}
+
+s|Label.TabButtonUnselected
+{
+	fontSize: 11;
+	fontWeight: bold;
+	textAlign: center;
+	color: #FFFFFF;
+}
+
+
+s|BorderContainer
+{
+	borderColor: #808080;
+}
+s|BorderContainer.DetailBand
+{
+	backgroundColor: #F5F8FF;
+	cornerRadius: 2;
+}
+s|TextArea.Header
+{
+	borderVisible: false;
+	fontFamily: Arial;
+	fontSize: 12;
+}
+mx|DataGrid
+{
+	chromeColor: #9DB6E1;
+	rollOverColor: #C4D3ED;
+}
+s|Button.Change
+{
+	fontFamily: Arial;
+	fontSize: 8;
+}
+
+
+

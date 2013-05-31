@@ -1,0 +1,176 @@
+<Policies>
+	<IAM>
+		<IAM_SIGNON>
+			<![CDATA[
+				{
+				  "Statement": [
+				    {
+				      "Action": ["sdb:Select"],
+				      "Effect": "Allow",
+				      "Resource": ["arn:aws:sdb:*:@@AWSACCOUNT@@:domain/Identities",
+				                   "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/Users"],
+				      "Condition": {"StringEquals": {"aws:UserAgent": "com.stratoscreen.agent"}}             
+				    }
+				  ]
+				}			
+			]]>		
+		</IAM_SIGNON>
+		<IAM_MANAGER>
+			<![CDATA[
+				{
+				  "Statement": [
+					{
+					  "Action": [
+						"sdb:BatchDeleteAttributes",
+						"sdb:BatchPutAttributes",
+						"sdb:DeleteAttributes",
+						"sdb:GetAttributes",
+						"sdb:PutAttributes",
+						"sdb:Select"
+					  ],
+				      "Effect": "Allow",
+				      "Resource": "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/*"
+				    },
+					{
+					  "Action": ["sdb:GetAttributes","sdb:Select" ],
+				      "Effect": "Allow",
+				      "Resource": ["arn:aws:sdb:*:@@AWSACCOUNT@@:domain/Identities",
+				      			  "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/Settings"]				      
+				    },
+				    {
+				      "Action": "s3:*",
+				      "Effect": "Allow",
+				      "Resource": "arn:aws:s3:::*"
+				    },
+				    {
+					"Action": [
+					        "s3:DeleteBucket",
+					        "s3:PutBucketAcl",
+					        "s3:PutBucketNotification",
+					        "s3:PutBucketPolicy",
+					        "s3:PutBucketRequestPayment",
+					        "s3:PutBucketVersioning"
+					      ],
+				      "Effect": "Deny",
+				      "Resource": "arn:aws:s3:::*"
+				    },
+				    {
+				      "Action": "ses:*",
+				      "Effect": "Allow",
+				      "Resource": "*"
+				    },
+				    {
+				      "Action": ["cloudfront:Get*", "cloudfront:List*" ],
+				      "Effect": "Allow",
+				      "Resource": "*"
+				    }
+				  ]
+				}
+			]]>		
+		</IAM_MANAGER>	
+		<IAM_USER>
+			<![CDATA[
+				{
+				  "Statement": [
+					{
+					  "Action": [
+						"sdb:BatchDeleteAttributes",
+						"sdb:BatchPutAttributes",
+						"sdb:DeleteAttributes",
+						"sdb:GetAttributes",
+						"sdb:PutAttributes",
+						"sdb:Select"
+					  ],
+				      "Effect": "Allow",
+				      "Resource": "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/*"
+				    },
+					{
+					  "Action": "sdb:*",
+					  "Effect": "Deny",
+					  "Resource": "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/Settings"
+					},		
+					{
+					  "Action": ["sdb:GetAttributes","sdb:Select" ],
+				      "Effect": "Allow",
+				      "Resource": "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/Identities"
+				    },
+				    {
+				      "Action": "s3:*",
+				      "Effect": "Allow",
+				      "Resource": "arn:aws:s3:::*"
+				    },
+				    {
+					"Action": [
+					        "s3:CreateBucket",
+					        "s3:DeleteBucket",
+					        "s3:PutBucketAcl",
+					        "s3:PutBucketNotification",
+					        "s3:PutBucketPolicy",
+					        "s3:PutBucketRequestPayment",
+					        "s3:PutBucketVersioning"
+					      ],
+				      "Effect": "Deny",
+				      "Resource": "arn:aws:s3:::*"
+				    },
+				    {
+				      "Action": "ses:*",
+				      "Effect": "Allow",
+				      "Resource": "*"
+				    },
+				    {
+				      "Action": ["cloudfront:Get*", "cloudfront:List*" ],
+				      "Effect": "Allow",
+				      "Resource": "*"
+				    }
+				  ]
+				}
+			]]>		
+		</IAM_USER>	
+		<IAM_PLAYER>
+			<![CDATA[
+				{
+				  "Statement": [
+					{
+					  "Action": [
+						"sdb:BatchDeleteAttributes",
+						"sdb:BatchPutAttributes",
+						"sdb:DeleteAttributes",
+						"sdb:GetAttributes",
+						"sdb:PutAttributes",
+						"sdb:Select"
+					  ],
+				      "Effect": "Allow",
+				      "Resource": "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/ScreenDetail"
+				    },
+					{
+					  "Action": ["sdb:GetAttributes","sdb:Select" ],
+				      "Effect": "Allow",
+				      "Resource": "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/*"
+				    },				    
+					{
+					  "Action": "sdb:*",
+					  "Effect": "Deny",
+					  "Resource": "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/Identities",
+ 					  "Resource": "arn:aws:sdb:*:@@AWSACCOUNT@@:domain/Users"
+					},		
+				    {
+					"Action": ["s3:GetObject","s3:ListBucket"],
+				      "Effect": "Allow",
+				      "Resource": "arn:aws:s3:::*"
+				    },
+				    {
+					"Action": ["s3:PutObject"],
+				      "Effect": "Allow",
+				      "Resource": "arn:aws:s3:::*/reports/*"
+				    },
+				    				    					    				    				    				    {
+				      "Action": ["cloudfront:Get*", "cloudfront:List*" ],
+				      "Effect": "Allow",
+				      "Resource": "*"
+				    }
+				  ]
+				}
+			]]>		
+		</IAM_PLAYER>			
+	</IAM>		
+</Policies>

@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="566" height="410" title="Configure Cloudfront"
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)"  xmlns:components="com.stratoscreen.components.*">
+
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.controller.StreamControl;
+			import com.stratoscreen.managers.AppManager;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+			
+			[Bindable] private var _isDirty:Boolean = false;
+			private var _appManager:AppManager;
+			private var _streamControl:StreamControl;
+			
+			protected function label1_clickHandler(event:MouseEvent):void
+			{
+				navigateToURL(new URLRequest("http://docs.amazonwebservices.com/AWSSecurityCredentials/1.0/AboutAWSCredentials.html#KeyPairs"));
+			}
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				_appManager = this.parentApplication.appManager;
+				
+				txtKeyPairId.text = _appManager.settings.decryptedKeyPairId;
+				txtKeyPair.text = _appManager.settings.decryptedKeyPair;
+				
+				if (_appManager.settings.decryptedKeyPair == "")
+				{
+					btnLock.selected = true;
+					btnLock.visible = false;
+				}
+			}
+
+
+			protected function closeHandler(event:Event):void
+			{
+				if (event == null)
+				{
+					PopUpManager.removePopUp(this);
+				}
+				else  
+				{
+					switch (CloseEvent(event).detail)
+					{
+						case Alert.NO:
+							// Keep alive
+							break;
+						
+						case Alert.YES:
+							PopUpManager.removePopUp(this);
+							break;
+						
+						default:
+							if (_isDirty) 
+							{
+								Alert.show("Do you want to close window?", "Close Window", Alert.YES | Alert.NO, null, closeHandler, null, Alert.NO);
+							}
+							else
+							{
+								PopUpManager.removePopUp(this);
+							}
+					}
+				}
+			}
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				//Check for valid input
+				txtKeyPairId.text = StringUtil.trim(txtKeyPairId.text.toUpperCase());
+				txtKeyPair.text = StringUtil.trim(txtKeyPair.text);
+				
+				if (txtKeyPairId.text.length < 10)
+				{
+					txtKeyPairId.errorString = "Invalid Key Pair ID";
+					Alert.show(txtKeyPairId.errorString, "Invalid Data");
+					return;
+				}
+								
+				if (txtKeyPair.text.length < 50)
+				{
+					txtKeyPairId.errorString = "Invalid Key Pair";
+					Alert.show(txtKeyPairId.errorString, "Invalid Data");
+					return;
+				}
+				
+				if (_appManager.settings.decryptedKeyPair != "")
+				{
+					Alert.show("Changing the CloudFront configuration may affect playback for streaming media on all accounts.\r\nDo you want to continue", "Change Configuration",
+						       Alert.YES | Alert.NO, null, answerHandler, null, Alert.NO);
+				}
+				else
+				{
+					// Skip nag screen and save
+					answerHandler(null);
+				}				
+			}
+			
+			private function answerHandler(event:CloseEvent):void
+			{
+				if (event != null)
+				{
+					if (event.detail == Alert.NO) {return;}
+				}
+				
+				this.enabled = false;
+				
+				// Save the key pair and private key
+				_appManager.settings.decryptedKeyPairId = txtKeyPairId.text;
+				_appManager.settings.decryptedKeyPair = txtKeyPair.text;	
+
+				// Create the cloudfront origin access if not created
+				if (_appManager.settings.s3CanonicalUserId == "" || _appManager.settings.originAccessIdentity == "")
+				{
+					// If this is the fist time we are setting up. We need to configure account for 
+					// clould front
+					lblStatus.text = "Configuring account for AWS Cloudfront";
+					_streamControl = new StreamControl(_appManager);
+					_streamControl.configure(configureHandler);
+					return;						
+				}
+				
+				saveSettings();
+			}
+
+			private function configureHandler():void
+			{
+				if (!_streamControl.success)
+				{
+					this.enabled = true;
+					Alert.show("Could not configure this account for Cloudfront. Please make sure the AWS service is enabled and try again", "Config Error");
+					return;					
+				}
+				
+				_appManager.settings.originAccessIdentity = _streamControl.cfOriginId;
+				_appManager.settings.s3CanonicalUserId = _streamControl.cfS3Id;
+				
+				saveSettings();
+			}
+
+			private function saveSettings():void
+			{
+				_appManager.settings.updated = true;
+				_appManager.sdb.updateDomain([_appManager.settings], saveSettingsHandler);
+			}
+			
+			private function saveSettingsHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				
+				if (!event.success)
+				{					
+					Alert.show("Could not save the settings. Please try again later", "Update Error");
+					return;
+				}
+				
+				PopUpManager.removePopUp(this);
+			}
+			
+			
+		]]>
+	</fx:Script>
+	<s:controlBarContent>
+		<s:Label text=" " id="lblStatus"/>
+	
+	</s:controlBarContent>
+	<s:Label y="10" text="Cloudfront streaming is used for securing streaming media. The keypair id and private key is required to enable streaming for all accounts. " left="10" right="10"/>
+	<s:Label y="40" text="Click here for more information" left="10" textDecoration="underline" color="#000080" buttonMode="true" useHandCursor="true" click="label1_clickHandler(event)"/>
+	<s:Label x="10" y="71" text="Key Pair ID" fontWeight="bold" height="20"/>
+	<s:TextInput y="71" id="txtKeyPairId" left="84" width="200" change="{_isDirty = true}"/>
+	<s:TextArea id="txtKeyPair"   left="84" right="10" fontFamily="Courier New" fontSize="11" bottom="40" top="99" change="{_isDirty = true}"/>
+	<s:Button label="Save" id="btnSave" click="btnSave_clickHandler(event)" enabled="{btnLock.selected}"  left="10" bottom="10"/>
+	<components:LockButton id="btnLock" left="90" bottom="10" enabled="{_isDirty}" />
+	<s:Label x="10" y="99" text="Private Key" fontWeight="bold"/>
+</s:TitleWindow>

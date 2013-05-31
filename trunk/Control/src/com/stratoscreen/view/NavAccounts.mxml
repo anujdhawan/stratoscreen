@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:view="com.stratoscreen.view.*" 
+					width="100%" height="100%" show="showHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.model.domains.Accounts;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.HierarchicalData;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ListEvent;
+			import mx.managers.PopUpManager;
+			
+			private static const DETAIL_HEIGHT:int = 135;
+			
+			private var _origAccounts:Array;
+			[Bindable] private var _accounts:ArrayCollection;
+			private var _winEditAccount:WinEditAccount;
+			
+			public function set accounts(value:Array):void
+			{
+				_origAccounts = value;
+				_accounts = new ArrayCollection(value);
+			}
+			
+			public function get accounts():Array
+			{
+				return _accounts.source;
+			}
+
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (this.parentApplication.appManager.settings.email == "")
+				{
+					Alert.show("An email has not been set for this service. Newly created accounts will not receive the welcome emails", "Missing Email");
+				}
+				
+				this.accounts = _origAccounts;
+				groupDetail.height = 0;
+				groupDetail.visible = false;
+				groupDetail.addEventListener(GroupAccountDetail.DETAIL_CLOSE, hideDetailHandler);
+			}
+			
+			public function editAccount(item:Object):void
+			{
+				_winEditAccount = new WinEditAccount();
+				if (item == null)
+				{
+					_winEditAccount.account = new Accounts();
+					_winEditAccount.newAccount = true;
+				}
+				else
+				{
+					_winEditAccount.account = item as Accounts;
+				}
+				
+				hideDetailHandler(null);
+				_winEditAccount.addEventListener(CloseEvent.CLOSE, closeHandler);
+				PopUpManager.addPopUp(_winEditAccount, DisplayObject(this.parentApplication), true);
+			}
+			
+			private function closeHandler(event:CloseEvent):void
+			{
+				if (event.target is WinEditAccount)
+				{
+					if (_winEditAccount.canceled) {return;}
+					
+					// Loop through and find the matching account
+					for (var i:int = 0; i < _accounts.length; i++)
+					{
+						if (_winEditAccount.account.itemName == _accounts[i].itemName)
+						{
+							if (_winEditAccount.deleted)
+							{
+								_accounts.removeItemAt(i);
+							}
+							else
+							{
+								_accounts[i] = _winEditAccount.account;
+							}
+							return;
+						}
+					}
+					
+					// If we are here, this mustbe a new account
+					_accounts.addItem(_winEditAccount.account);
+				}
+			}
+
+			protected function btnCreate_clickHandler(event:MouseEvent):void
+			{
+				editAccount(null);
+				hideDetailHandler(null);
+			}
+
+
+			protected function gridAccounts_itemClickHandler(event:ListEvent):void
+			{
+				groupDetail.account = event.itemRenderer.data as Accounts;
+				groupDetail.height = 135;
+				groupDetail.visible = true;
+			}
+
+			private function hideDetailHandler(event:Event):void
+			{
+				groupDetail.height = 0;
+				groupDetail.visible = false;	
+				groupDetail.account = new Accounts();	// Erase the binding
+			}
+		]]>
+	</fx:Script>
+	
+	<s:VGroup x="0" y="0" width="100%" height="100%" paddingLeft="10" paddingRight="10" paddingTop="10" paddingBottom="10">
+		<mx:DataGrid id="gridAccounts" height="100%" width="100%"  
+					 dataProvider="{_accounts}" itemClick="gridAccounts_itemClickHandler(event)">
+			<mx:columns>
+				<mx:DataGridColumn headerText="Account Name" dataField="name"/>
+				<mx:DataGridColumn headerText="Company Name" dataField="companyName"/>
+				<mx:DataGridColumn headerText="City" dataField="city"/>
+				<mx:DataGridColumn headerText="State" dataField="state"/>
+				<mx:DataGridColumn headerText="Bucket" dataField="bucket"/>
+				<mx:DataGridColumn headerText="Licenses" dataField="licenseCount"/>
+			</mx:columns>
+		</mx:DataGrid>
+		<view:GroupAccountDetail id="groupDetail" width="100%" height="135" />
+		<s:Button label="New Account" id="btnCreate" click="btnCreate_clickHandler(event)" left="10" bottom="10"/>
+	</s:VGroup>
+</s:NavigatorContent>

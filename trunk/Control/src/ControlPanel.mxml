@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+					   xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:panels="com.stratoscreen.view.panels.*"
+					   preinitialize="preinitializeHandler(event)" creationComplete="creationCompleteHandler(event)"  
+					   minHeight="700" minWidth="1000" xmlns:view="com.stratoscreen.view.*" xmlns:components="com.stratoscreen.components.*">
+	<fx:Style source="/assets/css/style.css"/>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.SharedKeys;
+			import com.stratoscreen.utils.LogUtils;
+			import com.stratoscreen.utils.SharedUtils;
+			import com.stratoscreen.view.*;
+			
+			import flash.utils.getDefinitionByName;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.core.IFlexDisplayObject;
+			import mx.core.INavigatorContent;
+			import mx.core.IVisualElement;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ListEvent;
+			import mx.managers.PopUpManager;
+			
+			import spark.components.NavigatorContent;
+			
+			[Bindable] private var _signedIn:Boolean = false;
+			[Bindable] private var _softwareInstalled:Boolean = false;
+			[Bindable] private var _accounts:Array;	// A truncated list of accounts for the navigation 
+			private var _appManager:AppManager;
+			private var _keysStored:Boolean = false;			
+			private var _encryptedAccessKey:String;
+			private var _encryptedSecretKey:String;
+			private var _region:int;
+			
+			public function get softwareInstalled():Boolean
+			{
+				return _softwareInstalled;
+			}
+			
+			public function set softwareInstalled(value:Boolean):void
+			{
+				_softwareInstalled = value;
+			}			
+			
+			public function get encryptedAccessKey():String
+			{
+				return _encryptedAccessKey;
+			}
+			
+			public function get encryptedSecretKey():String
+			{
+				return _encryptedSecretKey;
+			}			
+			
+			public function get appManager():AppManager
+			{
+				return _appManager;
+			}
+						
+			protected function preinitializeHandler(event:FlexEvent):void
+			{
+				_appManager = new AppManager(this);	
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				tabHome.selected = true;
+				tabAccounts.selected = false;
+				tabHome.addEventListener(TabButton.TAB_CLICKED, tabClickHandler);
+				tabAccounts.addEventListener(TabButton.TAB_CLICKED, tabClickHandler);
+				
+				// Allow the screen to draw
+				this.callLater(enterCredentials);
+			}
+					
+			public function enterCredentials(skipPassword:Boolean = false):void
+			{
+				var window:IFlexDisplayObject;				
+				
+				// Check to see if we have a stored keys
+				if (!skipPassword)
+				{
+					var defaultValue:String = "";
+					
+					_region = parseInt(SharedUtils.getValue(SharedKeys.REGION_ID_KEY, "1").toString());
+					_appManager.regionId = _region;
+					
+					_encryptedAccessKey = SharedUtils.getValue(SharedKeys.ENCRYPTED_ACCESS_KEY, defaultValue).toString();
+					_encryptedSecretKey = SharedUtils.getValue(SharedKeys.ENCRYPTED_SECRET_KEY, defaultValue).toString();
+					if (_encryptedAccessKey != "" && _encryptedSecretKey != "") {_keysStored = true;}
+					
+				}
+				
+				if (_keysStored && !skipPassword)
+				{
+					window = PopUpManager.createPopUp(this, WinPassword, true);
+				}
+				else
+				{
+					window = PopUpManager.createPopUp(this, WinSaveKeys, true);
+				}
+				window.addEventListener(CloseEvent.CLOSE, windowCloseHandler);				
+			}
+			
+			private function windowCloseHandler(event:CloseEvent):void
+			{
+				event.target.removeEventListener(Event.CLOSE, windowCloseHandler);
+				if (!event.target.success) {return;}
+				
+				// After we have the keys we need to see if the user is setup.
+				_signedIn = true;
+				navHome.updateSignedIn();
+				
+				var window:IFlexDisplayObject				
+				window = PopUpManager.createPopUp(this, WinQueryAWS, true);
+				window.addEventListener(CloseEvent.CLOSE, queryAWSHandler);				
+			}
+			
+			private function queryAWSHandler(event:CloseEvent):void
+			{
+				event.target.removeEventListener(CloseEvent.CLOSE, queryAWSHandler);
+				_softwareInstalled = event.target.success;		
+				
+				if (_softwareInstalled)
+				{
+					navAccounts.accounts = event.target.accounts;
+					navHome.navOverview.updateFields();
+				}
+				else
+				{
+					// Navigate to the install
+					navHome.vsMain.selectedChild = navHome.navInstall;
+				}
+			}
+
+			private function tabClickHandler(event:Event):void
+			{
+				if (!_signedIn || !_softwareInstalled) {return;}
+				if (event.target == tabHome)
+				{
+					tabHome.selected = true;
+					tabAccounts.selected = false;
+					vsMain.selectedIndex = 0;
+				}
+				else
+				{
+					tabHome.selected = false;
+					tabAccounts.selected = true;
+					vsMain.selectedIndex = 1;					
+				}
+			}
+			
+
+		]]>
+	</fx:Script>
+	<s:Rect width="100%" height="100">
+		<s:fill>
+			<s:LinearGradient rotation="90">
+				<s:GradientEntry color="#B1C5E7" />
+				<s:GradientEntry color="#FFFFFF" />
+			</s:LinearGradient>
+		</s:fill>
+	</s:Rect>
+	<s:BorderContainer left="10" bottom="10" right="10" top="75" styleName="Main" backgroundColor="#FFFFFF" contentBackgroundColor="#FFFFFF">
+		<mx:ViewStack  id="vsMain" width="100%" height="100%"  >
+			<view:NavHome id="navHome" label="Home"  width="100%" height="100%" />
+			<view:NavAccounts id="navAccounts" label="Accounts"  width="100%" height="100%" />
+		</mx:ViewStack>
+	</s:BorderContainer>
+	<components:TabButton id="tabHome" y="45" label="Home" selected="true"  right="97"/>
+	<components:TabButton id="tabAccounts" y="45" label="Accounts" selected="false"  right="24"/>
+	<s:Label x="69" y="21" text="StratoScreen Control Panel" fontFamily="Arial" fontSize="24" color="#404040" fontWeight="bold"/>
+	<mx:Image x="10" y="10" source="assets/swfs/stratoLogo.swf" width="58" height="42"/>
+	
+</s:WindowedApplication>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%" show="showHandler(event)">
+	<fx:Declarations>
+		<mx:StringValidator id="validName" source="{txtName}" property="text" trigger="{txtName}" triggerEvent="change"
+						   valid="{btnSave.enabled = true}" invalid="{btnSave.enabled = false}" />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.aws.SESEvent;
+			import com.stratoscreen.managers.AppManager;
+			
+			import mx.controls.Alert;
+			import mx.events.FlexEvent;
+			import mx.utils.StringUtil;
+
+			private var _appManager:AppManager;
+			
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (_appManager == null) {_appManager = this.parentApplication.appManager;}
+				txtName.text = _appManager.settings.name;
+				validName.validate();
+				txtName.setFocus();
+			}
+
+			protected function linkHome_clickHandler(event:MouseEvent):void
+			{
+				NavHome(this.parentDocument).vsMain.selectedChild =	NavHome(this.parentDocument).navOverview;
+			}
+
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				_appManager.settings.name = StringUtil.trim(txtName.text);
+				_appManager.settings.updated = true;
+				_appManager.sdb.updateDomain([_appManager.settings], settingsSaveHandler);
+			}
+			
+			private function settingsSaveHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not save name. Please try again");
+					return;
+				}
+				
+				NavHome(this.parentDocument).vsMain.selectedChild =	NavHome(this.parentDocument).navOverview;
+				NavHome(this.parentDocument).navOverview.lblName.text = txtName.text;				
+			}
+			
+		]]>
+	</fx:Script>
+	<s:TextArea heightInLines="NaN" width="100%" styleName="Header" fontWeight="bold" x="10" y="30">
+		<s:text>Set the provider name for the services</s:text>
+	</s:TextArea>
+	<mx:LinkButton x="0" y="0" label="Return to home page" icon="@Embed(source='/assets/icons/arrow_left.png')" id="linkHome" click="linkHome_clickHandler(event)"/>
+	<s:Label x="15" y="70" text="Name" height="20" fontWeight="bold"/>
+	<s:TextInput id="txtName" x="62" y="70" width="172"/>
+	<s:Button x="239" y="70" label="Save" id="btnSave" click="btnSave_clickHandler(event)" width="54"/>
+</s:NavigatorContent>

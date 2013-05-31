@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" 
+			   width="407" height="300" title="Enter Amazon credentials"
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)"  >
+	<fx:Declarations>
+		<mx:StringValidator id="validAccessKey" minLength="20" source="{txtAccessKey}" property="text" />						
+		<mx:StringValidator id="validSecretKey" source="{txtSecretKey}" property="text"  />						
+		<mx:StringValidator id="validPassword" source="{txtPassword}" minLength="5" property="text" />						
+		<mx:StringValidator id="validPassword2" source="{txtPassword2}" minLength="5" property="text"  />						
+		
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.IAMClass;
+			import com.stratoscreen.aws.IAMEvent;
+			import com.stratoscreen.model.SharedKeys;
+			import com.stratoscreen.utils.SecurityUtils;
+			import com.stratoscreen.utils.SharedUtils;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+			
+			import spark.events.TextOperationEvent;
+			
+			private var _keysSaved:Boolean = false;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+			}			
+			
+			protected function closeHandler(event:CloseEvent):void
+			{
+				// Send the event manually if needed
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+			
+			public function get success():Boolean
+			{
+				return _keysSaved;
+			}
+			
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				if (!validAccessKey.validate()) {return;}
+				if (!validSecretKey.validate()) {return;}
+				if (!validPassword.validate()) {return;}
+				if (!validPassword2.validate()) {return;}
+				
+				// Double check the password
+				txtPassword.errorString = "";
+				txtPassword2.errorString = "";
+				if (txtPassword.text != txtPassword2.text)
+				{
+					txtPassword.errorString = "Passwords do not match";
+					txtPassword2.errorString = txtPassword.errorString;
+					return;
+				}
+				
+				// Validate the AWS Keys before we save
+				var iam:IAMClass = new IAMClass("iam.amazonaws.com", txtAccessKey.text, txtSecretKey.text);
+				iam.validateKeys(validateKeyResult)					
+			}
+			
+			private function validateKeyResult(event:IAMEvent):void
+			{
+				if (!event.success) 
+				{
+					txtAccessKey.errorString = "Access key and secret key combination is invalid";
+					txtSecretKey.errorString = txtAccessKey.errorString;
+					return;
+				}
+				
+				// Encrypt and save the keys to the local storage
+				var encryptAccess:String = SecurityUtils.simpleEncrypt(txtAccessKey.text, 0, txtPassword.text);
+				var encryptSecret:String = SecurityUtils.simpleEncrypt(txtSecretKey.text, 0, txtPassword.text);
+				SharedUtils.setValue(SharedKeys.ENCRYPTED_ACCESS_KEY, encryptAccess);
+				SharedUtils.setValue(SharedKeys.ENCRYPTED_SECRET_KEY, encryptSecret);
+				
+				// Save the access keys back to main application
+				var controlPanel:ControlPanel = (this.parentApplication) as ControlPanel;
+				controlPanel.appManager.accessKey = txtAccessKey.text;
+				controlPanel.appManager.secretKey = txtSecretKey.text;
+				_keysSaved = true;
+				closeHandler(null);
+			}
+			
+			protected function txtPassword_changeHandler(event:TextOperationEvent):void
+			{
+				txtPassword.text = StringUtil.trim(txtPassword.text);
+			}
+			
+			protected function txtPassword2_changeHandler(event:TextOperationEvent):void
+			{
+				txtPassword2.text = StringUtil.trim(txtPassword2.text);
+			}
+		]]>
+	</fx:Script>
+	<s:Label x="23" y="36" text="Access key" height="21" fontWeight="normal"/>
+	<s:TextInput x="98" y="35" width="165" id="txtAccessKey" maxChars="20"  restrict="0-9A-Z"/>
+	<s:Label x="23" y="65" text="Secret key" fontWeight="normal" height="22"/>
+	<s:TextInput x="97" y="65" width="286" id="txtSecretKey" displayAsPassword="{!chkShowSecret.selected}"/>
+	<s:CheckBox x="99" y="95" label="Show secret key" id="chkShowSecret" selected="false" fontStyle="italic" fontWeight="normal" fontSize="11"/>
+	<s:Label x="23" y="167" text="Password" fontWeight="normal"/>
+	<s:TextInput x="133" y="163" width="252" id="txtPassword" change="txtPassword_changeHandler(event)" displayAsPassword="true"/>
+	<s:Label x="10" y="12" text="Amazon Settings" fontWeight="bold"/>
+	<s:Label x="10" y="140" text="Save keys in Control Panel" fontWeight="bold"/>
+	<s:Label x="23" y="195" text="Confirm Password" fontWeight="normal" fontStyle="italic"/>
+	<s:TextInput x="132" y="193" width="253" id="txtPassword2" change="txtPassword2_changeHandler(event)" displayAsPassword="true"/>
+	<s:Button label="Save" id="btnSave" click="btnSave_clickHandler(event)" left="10" bottom="10"/>
+</s:TitleWindow>

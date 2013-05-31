@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%" 
+					creationComplete="creationCompleteHandler(event)" creationPolicy="all" xmlns:components="com.stratoscreen.components.*">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.SharedKeys;
+			import com.stratoscreen.utils.SharedUtils;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			private var _appManager:AppManager;
+			private var _winProcess:WinProcess;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+			
+			protected function btnUninstall_clickHandler(event:MouseEvent):void
+			{
+				var message:String = "Warning. Uninstalling will delete all users, data, and files.\r\n";
+				message += "Do you want to continue?";
+				
+				Alert.show(message, "Uninstall service", Alert.YES | Alert.NO, null, answerHandler, null, Alert.NO);
+			}
+			
+			private function answerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.NO) {return;}
+				
+				_winProcess = new WinProcess();
+				_winProcess.action = WinProcess.UNINSTALL;
+				_winProcess.addEventListener(CloseEvent.CLOSE, processCloseHandler);
+				PopUpManager.addPopUp(_winProcess, this.parentApplication as DisplayObject, true);
+			}
+			
+			private function processCloseHandler(event:CloseEvent):void
+			{
+				if (_winProcess.success)
+				{
+					Alert.show("Application successfully uninstalled", "Uninstall", 4, null, closeApplication );
+				}
+				else
+				{
+					var msg:String = "Application did not uninstall properly.\r\n";
+					msg += "Some AWS services may need to be manually removed.";
+					
+					Alert.show(msg, "Uninstall", 4, null, closeApplication );		
+				}
+				
+				
+				// We are done. Force the client to get out.
+				SharedUtils.setValue(SharedKeys.ENCRYPTED_ACCESS_KEY, null);
+				SharedUtils.setValue(SharedKeys.ENCRYPTED_SECRET_KEY, null);
+				SharedUtils.setValue(SharedKeys.REGION_ID_KEY, null);
+				
+			}			
+
+			private function closeApplication(event:CloseEvent):void
+			{
+				NativeApplication.nativeApplication.exit();
+			}
+
+			protected function linkHome_clickHandler(event:MouseEvent):void
+			{
+				NavHome(this.parentDocument).vsMain.selectedChild =	NavHome(this.parentDocument).navOverview;
+			}
+
+		]]>
+	</fx:Script>
+	<s:Group width="100%" height="100%">
+		<s:Button x="10" y="97" label="Uninstall" id="btnUninstall" click="btnUninstall_clickHandler(event)" enabled="{btnLock.selected}"/>
+		<components:LockButton x="93" y="97" id="btnLock" />
+		<s:TextArea heightInLines="NaN" width="100%" styleName="Header" fontWeight="bold" x="10" y="30">
+			<s:text>
+				Remove your StratoScreen account and delete all items from the Amazon web services.
+			</s:text>
+		</s:TextArea>
+		<mx:LinkButton x="0" y="0" label="Return to home page" icon="@Embed(source='/assets/icons/arrow_left.png')" id="linkHome" click="linkHome_clickHandler(event)"/>
+	</s:Group>		
+</s:NavigatorContent>

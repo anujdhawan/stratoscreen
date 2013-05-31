@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<StreamingDistributionConfig xmlns="http://cloudfront.amazonaws.com/doc/2010-11-01/">
+   <S3Origin>
+      <DNSName>@@DNSNAME@@</DNSName>
+      <OriginAccessIdentity>origin-access-identity/cloudfront/@@ORGINID@@</OriginAccessIdentity>
+   </S3Origin>
+   <CallerReference>@@REF@@</CallerReference>
+   <Comment>@@COMMENT@@</Comment>
+   <Enabled>true</Enabled>
+</StreamingDistributionConfig>
