@@ -1,0 +1,7 @@
+<Grant>
+	<Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser">
+		<ID>@@ORGINID@@</ID>
+		<DisplayName>SratoScreen - CloundFront</DisplayName>
+	</Grantee>
+	<Permission>@@ACCESS@@</Permission> 
+</Grant>

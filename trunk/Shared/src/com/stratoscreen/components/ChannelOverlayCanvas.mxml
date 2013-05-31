@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%" clipAndEnableScrolling="true"  
+		 creationComplete="creationCompleteHandler(event)">
+	<fx:Declarations>
+		<!-- use for switching overlays -->
+		<s:Fade id="fadeIn" alphaFrom="0" alphaTo="1" duration="250"/>
+		<s:Fade id="fadeOut" alphaFrom="1" alphaTo="0" duration="250" effectEnd="fadeOut_effectEndHandler(event)" />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			import com.stratoscreen.utils.ImageUtils;
+			
+			import flash.events.TimerEvent;
+			import flash.utils.Timer;
+			
+			import mx.collections.ArrayCollection;
+			import mx.events.EffectEvent;
+			import mx.events.FlexEvent;
+
+			public var viewMode:String;
+			
+			private var _appManager:AppManager;
+			private var _soundCanvas:ChannelSoundCanvas;
+			private var _details:ArrayCollection;
+			private var _useSchedule:Boolean;
+			private var _isPlayer:Boolean;
+			private var _timer:Timer;
+			private var _startTime:Date;
+			private var _index:int;
+			private var _subIndex:int;						
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+					
+				_timer = new Timer(250);
+				_timer.addEventListener(TimerEvent.TIMER, timerHandler);
+			}
+			
+			public function play(details:ArrayCollection, isPlayer:Boolean):void
+			{
+				// Stop processing if there is nothing to show
+				if (details == null || details.length == 0) {return;}
+								
+				_useSchedule = isPlayer;	
+				_isPlayer = isPlayer;
+				_details = details;
+				_index = -1;
+				
+				playNextOverlay();
+			}
+			
+			public function stop():void
+			{
+				_timer.stop()
+				if (_soundCanvas != null) {_soundCanvas.stop();}
+				canvas.removeAllElements();
+			}
+			
+			protected function fadeOut_effectEndHandler(event:EffectEvent):void
+			{
+				canvas.removeAllElements();
+				playNextOverlay();	
+			}
+			
+			public function playNextOverlay():void
+			{
+				_index ++;
+				
+				if (_index >= _details.length)
+				{
+					_index = -1;
+					this.callLater(playNextOverlay);
+					return;	
+				}
+				
+				// Resize the canvas to match the parent
+				var imageUtils:ImageUtils = new ImageUtils(this.viewMode);
+				var overlayWidth:Number = parseFloat(_details[_index].width);
+				var overlayHeight:Number = parseFloat(_details[_index].height);
+				var rect:ResizeRectangle = imageUtils.getBestFit(overlayWidth, overlayHeight, this.width, this.height);
+				
+				canvas.x = rect.x;
+				canvas.y = rect.y;
+				canvas.width = overlayWidth;	// Keep the original size. We will scale it
+				canvas.height = overlayHeight;
+				canvas.scaleX = rect.scaleX;
+				canvas.scaleY = rect.scaleY;
+								
+				// Set the alpha to zero. The fade in will change it back
+				this.alpha = 0;
+				addOverlayDetail();
+				
+				_startTime = new Date();
+				_timer.start();
+				fadeIn.play([this]);	
+			}
+
+			private function addOverlayDetail():void
+			{
+				canvas.removeAllElements();
+				
+				for each (var detail:OverlayDetail in _details[_index].subDetail)
+				{
+					switch (detail.type)
+					{
+						case OverlayDetail.TYPE_TEXT:
+							var text:OverlayDisplayText = new OverlayDisplayText();
+							text.overlayDetail = detail;
+							
+							text.text = detail.text;
+							text.x = parseFloat(detail.x);
+							text.y = parseFloat(detail.y);
+							text.width = parseFloat(detail.width);
+							text.height = parseFloat(detail.height);
+							text.rotation = parseFloat(detail.rotate);
+							text.alpha =  parseFloat(detail.alpha);
+							text.setStyle("color", "#" + detail.color);
+							text.setStyle("fontFamily", detail.fontFamily);
+							text.setStyle("fontSize", detail.fontSize);
+							text.setStyle("fontStyle", detail.fontStyle);
+							text.setStyle("fontWeight", detail.fontWeight);
+							text.setStyle("textDecoration", detail.textDecoration);
+							text.filters = detail.filters;
+							text.visible = false;	// The controll will set back to visible
+							
+							canvas.addElement(text);
+							break;
+						
+						case OverlayDetail.TYPE_MEDIA:
+							if (detail.isImage || detail.isSWF)
+							{
+								var swf:OverlayDisplaySWF = new OverlayDisplaySWF();
+								swf.overlayDetail = detail;
+								swf.x = parseFloat(detail.x);
+								swf.y = parseFloat(detail.y);
+								swf.width = parseFloat(detail.width);
+								swf.height = parseFloat(detail.height);
+								swf.rotation = parseFloat(detail.rotate);
+								swf.alpha =  parseFloat(detail.alpha);			
+								swf.filters = detail.filters;
+								
+								canvas.addElement(swf);
+							}
+							else if (detail.isAudio)
+							{
+								var aud:OverlayDisplayAudio = new OverlayDisplayAudio();
+								aud.overlayDetail = detail;
+								
+								canvas.addElement(aud);
+							}
+							break;
+					}
+				}				
+			}
+
+			private function timerHandler(event:TimerEvent):void
+			{
+				// Keep track of how long the media has played
+				var duration:int = parseInt(_details[_index].duration);								
+				
+				var now:Date = new Date();
+				var milliElapsed:Number = now.time - _startTime.time;
+				
+				if (milliElapsed > (duration * 1000))
+				{
+					_timer.stop();
+					fadeOut.play([this]);
+				}
+			}
+				
+
+		]]>
+	</fx:Script>
+	<s:Group id="canvas"  />
+</s:Group>
