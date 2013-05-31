@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Application xmlns:fx="http://ns.adobe.com/mxml/2009"
+			   xmlns:s="library://ns.adobe.com/flex/spark"
+			   xmlns:view="com.stratoscreen.view.*"
+			   width="100%" height="100%" backgroundColor="#000000" 
+			   skinClass="com.stratoscreen.skins.StageVideoSkin" currentState="control" 
+			   splashScreenImage="com.stratoscreen.SplashScreen" splashScreenScaleMode="letterbox" splashScreenMinimumDisplayTime="4000"
+			   preinitialize="this_preinitializeHandler(event)" creationComplete="this_creationCompleteHandler(event)" applicationComplete="this_applicationCompleteHandler(event)"  >
+	<fx:Declarations>		
+		<s:Fade id="fadeIn" alphaFrom="0" alphaTo="1" duration="500" />
+		<s:Fade id="fadeOut" alphaFrom="1" alphaTo="0" duration="250" effectEnd="fadeOut_effectEndHandler(event)" />
+		<s:GlowFilter id="glowSelected" color="#E7B96F" blurX="12" blurY="12" quality="4" strength="2" alpha="1" />			
+	</fx:Declarations>
+	<fx:Style source="/assets/css/style.css"/>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.controller.BandwidthMonitor;
+			import com.stratoscreen.controls.AlertWindow;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.DataManager;
+			import com.stratoscreen.managers.TaskManager;
+			import com.stratoscreen.model.domains.Screens;
+			import com.stratoscreen.skins.MenuButton;
+			
+			import mx.events.EffectEvent;
+			import mx.events.FlexEvent;
+			
+			import spark.events.PopUpEvent;
+			
+			private var _appManager:AppManager;
+			private var _dataManager:DataManager;
+			private var _taskManager:TaskManager;
+			private var _interuptTimer:Timer;
+			private var _selectedButton:int = 0;	
+			
+			private const THIS_TYPE:String = Screens.DEVICE_ANDROID;
+			
+			public function get deviceType():String
+			{
+				return THIS_TYPE;
+			}
+			
+			public function get appManager():AppManager
+			{
+				return _appManager;
+			}
+			
+			public function get dataManager():DataManager
+			{
+				return _dataManager;
+			}
+			
+			public function get taskManager():TaskManager
+			{
+				return _taskManager;
+			}
+			
+			protected function this_preinitializeHandler(event:FlexEvent):void
+			{
+			}
+			
+			
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				// Set the static reference on the required classes
+				AlertWindow.setAppParent(this);
+				
+				NativeApplication.nativeApplication.systemIdleMode = SystemIdleMode.KEEP_AWAKE;
+				
+				playerControl.addEventListener(PlayerControl.CHANNEL_START, startChannelHandler);
+				playerControl.addEventListener(PlayerControl.CHANNEL_STOP, stopChannelHandler);	
+				
+				borderMenu.visible = false;
+			}
+			
+			protected function this_applicationCompleteHandler(event:FlexEvent):void
+			{
+				this.stage.addEventListener(KeyboardEvent.KEY_DOWN, keyDownMenuHandler);			
+				stage.displayState = StageDisplayState.FULL_SCREEN_INTERACTIVE;
+			}
+			
+			/** 
+			 * The entire appwill refer to the parent for the Managers.
+			 *  
+			 * Allow a different process to create the managers
+			 */  
+			public function setManagers(appManager:AppManager, dataManager:DataManager,  taskManager:TaskManager):void
+			{
+				_appManager = appManager;
+				_dataManager = dataManager;
+				_taskManager = taskManager;
+				
+				// We need to track bandwidth usage too
+				BandwidthMonitor.reportFolder = _appManager.reportsFolder();
+			}
+			
+			private function startChannelHandler(event:Event):void
+			{
+				this.currentState = "play";
+				if (playerPlay != null) {playerPlay.play();}
+			}
+
+			private function stopChannelHandler(event:Event):void
+			{
+				this.currentState = "control";
+				if (playerPlay != null) {playerPlay.stop();}
+			}
+			
+			private function playerPlay_completeHandler(event:Event):void
+			{
+				if (!playerPlay.hasEventListener(PlayerPlay.NO_CHANNEL))
+				{
+					playerPlay.addEventListener(PlayerPlay.NO_CHANNEL, noChannelHandler);
+				}
+				if (!playerPlay.isPlaying) {playerPlay.play();}
+			}
+			
+			private function noChannelHandler(event:Event):void
+			{
+				this.currentState = "control";
+				playerPlay.stop();
+				playerControl.currentState = "menu";
+			}
+			
+			/**
+			 * I am not sure if this the best method to handle interface
+			 */
+			private function keyDownMenuHandler(event:KeyboardEvent):void
+			{
+				var menuIsVisible:Boolean = borderMenu.visible || fadeIn.isPlaying;
+
+				switch (event.keyCode)
+				{
+					case Keyboard.MENU:
+						if (this.currentState == "play")
+						{
+							menuIsVisible = false;
+							if (playerPlay.isPlaying)
+							{
+								new AlertWindow("Do you want to stop the player", "Stop Player", true, this, stopAnswerHandler, true);
+							}
+						}
+						else
+						{
+							this.callLater(showMenu);
+						}
+						break;
+					
+					case Keyboard.BACK:
+						if (menuIsVisible)	
+						{
+							fadeOut.play([borderMenu]);
+							event.preventDefault();
+							event.stopImmediatePropagation();
+						} 
+						break;
+					
+					case Keyboard.UP:
+					case Keyboard.DOWN:
+					case Keyboard.LEFT:
+					case Keyboard.RIGHT:
+						if (menuIsVisible)	
+						{
+							setSelectedButton();
+							event.preventDefault();
+							event.stopImmediatePropagation();
+						}
+						break;						
+					
+					case Keyboard.ENTER:
+						if (menuIsVisible)	
+						{
+							clickSelectedButton();
+							event.preventDefault();
+							event.stopImmediatePropagation();
+						}
+						break;
+				}
+			}
+			
+			private function showMenu():void
+			{
+				// Turn off if we are visible
+				var menuIsVisible:Boolean = borderMenu.visible || fadeIn.isPlaying;
+				if (menuIsVisible)
+				{
+					fadeOut.play([borderMenu]);
+					return;
+				}
+				
+				if (playerControl.currentState == "menu")
+				{
+					// SHow the Settings or Exit Menu
+					fadeIn.play([borderMenu]);	
+					
+					_selectedButton = -1;
+					setSelectedButton();
+				}
+				else
+				{
+					if (playerControl.currentState != "install")
+					{
+						playerControl.stopStarting();
+						playerControl.currentState = "menu"
+					}
+				}
+			}
+			
+			private function setSelectedButton():void
+			{
+				_selectedButton ++;
+				if (_selectedButton > 1) {_selectedButton = 0;}
+
+				btnSettings.filters = _selectedButton == 0 ?  [glowSelected] : [];
+				btnExit.filters = _selectedButton == 1 ?  [glowSelected] : [];
+			}
+			
+			private function clickSelectedButton():void
+			{
+				_selectedButton == 0 ? settings_clickHandler(null) : exit_clickHandler(null);
+			}
+			
+			private function stopAnswerHandler(event:PopUpEvent):void
+			{
+				if (event.data == AlertWindow.YES) 
+				{
+					this.currentState = "control";
+					playerPlay.stop();
+					playerControl.currentState = "menu";
+				}
+			}
+			
+			private function exitAnswerHandler(event:PopUpEvent):void
+			{
+				if (event.data == AlertWindow.YES) 
+				{
+					NativeApplication.nativeApplication.exit();			
+				}
+			}
+				
+			protected function settings_clickHandler(event:MouseEvent):void
+			{
+				playerControl.currentState = "settings";
+				borderMenu.visible = false;
+			}
+
+			protected function exit_clickHandler(event:MouseEvent):void
+			{
+				NativeApplication.nativeApplication.exit();			
+			}
+
+			protected function fadeOut_effectEndHandler(event:EffectEvent):void
+			{
+				borderMenu.visible = false;
+			}
+			
+		]]>
+	</fx:Script>
+	<s:states>
+		<s:State name="control"/>
+		<s:State name="play"/>
+	</s:states>
+	<view:PlayerControl id="playerControl" width="100%" height="100%" visible.play="false" visible.control="true" />
+	<view:PlayerPlay id="playerPlay" includeIn="play" width="100%" height="100%" 
+					 creationComplete="playerPlay_completeHandler(event)"  />	
+	<s:BorderContainer id="borderMenu" bottom="0" horizontalCenter="0" backgroundColor="0x000000" backgroundAlpha=".8" borderVisible="false">
+		<s:HGroup paddingBottom="20" paddingLeft="20" paddingRight="20" paddingTop="20"
+				  gap="12">
+			<s:Button id="btnSettings" label="Settings" icon="@Embed('/assets/gears.png')" tabEnabled="true"
+					  tabIndex="1" skinClass="com.stratoscreen.skins.MenuButton" click="settings_clickHandler(event)"/>
+	
+			<s:Button id="btnExit"  label="Exit"  tabEnabled="true" tabIndex="2"
+					  icon="@Embed('/assets/exit.png')" skinClass="com.stratoscreen.skins.MenuButton"
+					  click="exit_clickHandler(event)"  />
+			
+		</s:HGroup> 
+	</s:BorderContainer>
+</s:Application>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:SplashScreenImage xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark">
+	<fx:Script>
+		<![CDATA[
+			
+			[Bindable] [Embed(source="/assets/stratoSplash.swf")]
+			private static var splashSWF:Class;
+
+			[Bindable] [Embed(source="/assets/stratoSplashAccel.swf")]
+			private static var splashSWFAccel:Class;
+
+			public override function getImageClass(aspectRatio:String, dpi:Number, resolution:Number):Class
+			{
+				// Are we hardware accelerated?
+				var xml:XML = NativeApplication.nativeApplication.applicationDescriptor;
+				var ns:Namespace = xml.namespace();
+				
+				var initialWindow:XML = xml.ns::initialWindow[0];
+				var ns2:Namespace = initialWindow.namespace();
+				
+				var renderMode:String = initialWindow.ns2::renderMode[0].toString();
+				renderMode = renderMode.toLowerCase();
+				
+				if (renderMode == "direct")
+				{
+					return  splashSWFAccel as Class;	
+				}
+				
+				// We must be a "auto"
+				return  splashSWF as Class;	
+			}
+		]]>
+	</fx:Script>
+</s:SplashScreenImage>
