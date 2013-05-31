@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:SkinnablePopUpContainer xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+						   creationComplete="this_creationCompleteHandler(event)" addedToStage="this_addedToStageHandler(event)">
+	<fx:Declarations>
+		<s:GlowFilter id="glowSelected" color="#E7B96F" blurX="12" blurY="12" quality="4" strength="2" alpha="1" />			
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			[Bindable] public var title:String;
+			[Bindable] public var body:String;
+			public var showYesNo:Boolean = false;
+			[Bindable] private var _maxWidth:Number;
+			private var _yesSelected:Boolean = true;	// We want to default to "No"
+			private var _nothingSelected:Boolean = true;
+						
+			public static const YES:uint = 1;
+			public static const NO:uint = 2;
+			public static const OK:uint = 4;
+			
+			public override function set maxWidth(value:Number):void
+			{
+				super.maxWidth = value;
+				_maxWidth = value;
+			}
+			
+			public function get yesSelected():Boolean
+			{
+				if (!showYesNo) {return false;}
+				_nothingSelected = false;
+				return _yesSelected;
+			}
+			
+			public function set yesSelected(value:Boolean):void
+			{
+				// Assume controls are rendered
+				if (!showYesNo) {return;}
+				
+				_yesSelected = value;
+				
+				btnAlertYes.filters = _yesSelected ? [glowSelected] : [];
+				btnAlertNo.filters = _yesSelected ? [] : [glowSelected];				
+			}
+			
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				this.currentState = showYesNo ? "yesNo" : "ok";
+				PopUpManager.centerPopUp(this);
+			}
+			
+			protected function this_addedToStageHandler(event:Event):void
+			{
+				this.stage.addEventListener(KeyboardEvent.KEY_DOWN, stage_keyDownHandler);
+			}
+			
+			private function stage_keyDownHandler(event:KeyboardEvent):void
+			{
+				switch (event.keyCode)
+				{
+					case Keyboard.ENTER:
+						if (showYesNo)
+						{
+							if (_nothingSelected)
+							{
+								this.yesSelected = false;
+								return;
+							}
+							
+							close(false, this.yesSelected ? YES : NO);
+						}
+						else
+						{
+							close(false, OK);
+						}
+						break;
+					
+					case Keyboard.UP:
+					case Keyboard.DOWN:
+					case Keyboard.RIGHT:
+					case Keyboard.LEFT:
+						if (showYesNo) {this.yesSelected = !this.yesSelected;}
+						break;
+					
+
+				}				
+			}
+			
+		]]>
+	</fx:Script>
+	<s:states>
+		<s:State name="ok"/>
+		<s:State name="yesNo"/>
+	</s:states>
+	<s:BorderContainer borderWeight="2">
+		<s:layout>
+			<s:VerticalLayout/>
+		</s:layout>
+		<s:BorderContainer width="100%" backgroundColor="#404040" dropShadowVisible="false">
+			<s:layout>
+				<s:VerticalLayout horizontalAlign="center" paddingBottom="5" paddingLeft="10" paddingRight="10" paddingTop="5" />
+			</s:layout>
+			<s:Label height="100%" color="#FFFFFF" text="{title}" textAlign="center"
+					 verticalAlign="middle"/>
+		</s:BorderContainer>
+		<s:Spacer height="10" />
+		<s:Label text="{body}" width="100%" maxWidth="{_maxWidth}" paddingLeft="10" paddingRight="10" />
+		<s:Spacer height="5" />
+		<s:HGroup width="100%" horizontalAlign="center">
+			<s:Button id="btnAlertOk" includeIn="ok" label="OK" click="close(false, OK)"
+					  skinClass="com.stratoscreen.skins.Button"/>	
+			<s:Button id="btnAlertYes" label="Yes" click="close(false, YES)" includeIn="yesNo" tabEnabled="true"/>
+			<s:Button id="btnAlertNo" label="No" click="close(false, NO)" includeIn="yesNo" tabEnabled="true"/>
+		</s:HGroup>
+		<s:Spacer height="10" />
+	</s:BorderContainer>	
+</s:SkinnablePopUpContainer>

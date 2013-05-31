@@ -1,0 +1,72 @@
+/* CSS file */
+@namespace s "library://ns.adobe.com/flex/spark";
+@namespace mx "library://ns.adobe.com/flex/mx";
+
+s|Application
+{
+	chromeColor: #C4D3ED;
+	focusColor: #E7B96F;
+	fontFamily: Arial;
+	fontSize: 16;
+	color: #404040;
+	symbol-color: #404040;
+}
+
+
+s|Button
+{
+	chromeColor: #C4D3ED;
+	focusColor: #E7B96F;
+	fontWeight: normal;
+	fontFamily: Arial;
+	fontSize: 22;
+	skinClass: ClassReference("com.stratoscreen.skins.Button");
+}
+
+s|TextInput
+{
+	fontFamily: Arial;
+}
+
+s|Label
+{
+	verticalAlign: middle;
+}
+
+s|Panel #titleDisplay 
+{
+	color: #404040;	
+}
+
+s|CheckBox
+{
+	fontStyle: normal;
+	fontWeight: normal;
+	color: #E0E0E0;
+	fontFamily: Arial;
+	fontSize: 20;
+	skinClass: ClassReference("com.stratoscreen.skins.CheckBox");
+}
+
+s|RadioButton
+{
+	color: #E0E0E0;
+	fontFamily: Arial;
+	fontSize: 20;
+	fontWeight: normal;
+	skinClass: ClassReference("com.stratoscreen.skins.RadioButton");
+}
+
+s|Label.header
+{
+	color: #9DB6E1;
+	fontFamily: Arial;
+	fontSize: 20;
+	fontWeight: bold;
+}
+
+
+
+
+
+

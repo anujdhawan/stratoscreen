@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009"
+				xmlns:s="library://ns.adobe.com/flex/spark"
+				xmlns:mx="library://ns.adobe.com/flex/mx"
+				width="160" height="100" contentBackgroundAlpha="0" autoDrawBackground="false" 
+				click="this_clickHandler(event)" creationComplete="this_creationCompleteHandler(event)"	>
+	<fx:Declarations>
+		<s:GlowFilter id="glowSelected" color="#E7B96F" blurX="12" blurY="12" quality="4" strength="2" alpha="1" />	
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Channels;
+			import com.stratoscreen.view.ChannelSelect;
+			
+			import mx.events.FlexEvent;
+			import mx.messaging.Channel;
+			
+			private static var _appManager:AppManager;
+			private static var _s3Endpoint:String;
+			private static var _bucket:String
+			
+			[Embed("/assets/images/gears.png")]
+			private static var iconGears:Class;
+			
+			[Bindable] private var _channel:Channels;
+			[Bindable] private var _thumbUrl:Object;		
+			[Bindable] private var _isBold:Boolean = false;
+			[Bindable] private var _selected:Boolean = false;
+			
+			private var _channelSelect:ChannelSelect;
+			
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				// There has to be an easier way to highlight this!
+				_channelSelect = this.parentApplication.playerControl.channelSelect;	
+				_channelSelect.addEventListener(ChannelSelect.SELECTION_CHANGE, selectChangeHandler);
+			}
+			
+			public override function set data(value:Object):void
+			{
+				super.data = value;
+				_channel = null;
+				if (_appManager == null) {_appManager = this.parentApplication.appManager;}
+				
+				if (_s3Endpoint == null) {_s3Endpoint = AWSRegions.getAWSEndpoint(_appManager.regionId).s3;}
+				
+				if (_bucket == null) {_bucket = _appManager.accountBucket;}
+				
+				if (!(value is Channels)) 
+				{
+					_thumbUrl = null;
+					return;
+				}
+				
+				_channel = value as Channels;
+				
+				// Is this the default channel?
+				if (_channel.itemName == "")
+				{
+					_thumbUrl = new iconGears();
+					_isBold = true;
+				}
+				else
+				{
+					// Double check for a missing thumbnail
+					_isBold = false;
+					var thumb:File = _appManager.mediaFolder( Constants.THUMB_PREFIX + _channel.firstMediaId + Constants.THUMB_EXTENSION);
+					
+					var url:String;
+					if (thumb.exists)
+					{
+						url = _appManager.mediaFolder().url + "/";
+					}
+					else
+					{
+						url = "https://" + _s3Endpoint + "/" + _bucket + "/";
+					}
+					url += Constants.THUMB_PREFIX + _channel.firstMediaId + Constants.THUMB_EXTENSION;
+					
+					_thumbUrl = url;
+				}
+			}
+			
+			protected function this_clickHandler(event:MouseEvent):void
+			{
+				this.parentDocument.parentDocument.playChannel(_channel.itemName);				
+			}
+			
+			private function selectChangeHandler(event:Event):void
+			{
+				var selected:Boolean = _channelSelect.selectedChannelId == _channel.itemName;
+				imgFilm.filters = selected ? [glowSelected] : [];
+			}
+			
+		]]>
+	</fx:Script>
+	<s:VGroup horizontalAlign="center" horizontalCenter="0" verticalAlign="middle" verticalCenter="2">
+		<s:Group horizontalCenter="0">
+			<s:Image id="imgFilm" source="@Embed('/assets/images/filmStrip.png')"  width="128" height="69" />
+			<s:Image id="imgThumb" x="15" y="3" width="98" height="63" scaleMode="stretch"
+					 smooth="true" source="{_thumbUrl}"/>
+		</s:Group>
+		<s:Label width="150" color="#FFFFFF" fontFamily="Arial" fontSize="18"
+				 fontWeight="{_isBold ? 'bold' : 'normal'}" horizontalCenter="0"
+				 maxDisplayedLines="1" text="{_channel.name}" textAlign="center"/>
+		
+	</s:VGroup>
+</s:ItemRenderer>

@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%" 
+		 creationComplete="creationCompleteHandler(event)" addedToStage="this_addedToStageHandler(event)" removedFromStage="removedFromStageHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.PlayerConstants;
+			import com.stratoscreen.components.NetConnection_;
+			import com.stratoscreen.components.NetStream_;
+			import com.stratoscreen.utils.LogUtils;
+			
+			import mx.events.FlexEvent;
+			import mx.utils.URLUtil;
+			
+			import org.bytearray.video.SimpleStageVideo;
+			import org.bytearray.video.events.SimpleStageVideoEvent;			
+			
+			public static const VIDEO_START:String = "VIDEO_START";
+			public static const VIDEO_END:String = "VIDEO_END";
+
+			[Bindable] public var debugMode:Boolean = false;
+			[Bindable] public var useAccel:Boolean = false;
+			public var videoRect:Rectangle;
+
+			private var _netStream:NetStream_;
+			private var _netConnect:NetConnection_;
+			private var _video:SimpleStageVideo;
+			private var _startEventSubmitted:Boolean = false;
+			private var _endEventSubmitted:Boolean = false;
+			private var _missingMedia:Boolean = false;
+			private var _urlContext:String;
+			private var _urlFile:String;
+			private var _timeout:Timer;
+			private var _stream:Boolean = false;
+			private var _videoUrl:String;
+			private var _streamUrl:String;
+			private var _waitingForInit:Boolean;
+			
+			public function get missingMedia():Boolean 
+			{
+				return _missingMedia;
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+			}
+			
+			protected function this_addedToStageHandler(event:Event):void
+			{				
+				// Fix this later
+				_urlContext = null;	// If we are streaming we need to connect differntly
+				
+				_netConnect = new NetConnection_();
+				_netConnect.addEventListener(NetStatusEvent.NET_STATUS, netConnectStatusHandler);
+				_netConnect.connect(_urlContext);	// Will be NULL if playing locally
+			}
+						
+			private function netConnectStatusHandler(event:NetStatusEvent):void
+			{
+				if (event.info != null)
+				{
+					switch (event.info.code)
+					{
+						case "NetConnection.Connect.Success":
+							_netConnect.removeEventListener(NetStatusEvent.NET_STATUS, netConnectStatusHandler);
+							loadNetStream();
+							break;
+							
+						default:
+							//trace(event.info.code);
+					}
+				}
+			}
+			
+			private function loadNetStream():void
+			{
+				_netStream = new NetStream_(_netConnect);
+				_netStream.addEventListener(NetStatusEvent.NET_STATUS, netStatusHandler);
+				
+				// Assume the values are set before we start
+				_video = new SimpleStageVideo(videoRect.x, videoRect.y, videoRect.width, videoRect.height);
+				_video.addEventListener(Event.INIT, initHandler);
+				_video.addEventListener(SimpleStageVideoEvent.STATUS, statusHandler);
+				_video.useAccel = this.useAccel;
+				_video.attachNetStream(_netStream);
+				
+				holder.addChild(_video);				
+			}
+			
+			public function play(url:String, stream:Boolean = false):void
+			{
+				_videoUrl = url;
+				_stream = false;
+				_endEventSubmitted = false;
+				
+				if (stream)
+				{
+					// Use the cfx/st token
+					var sections:Array = _videoUrl.split("cfx/st/");
+					_urlContext = sections[0] + "cfx/st";
+					_streamUrl = sections[1];
+				}
+				
+				// Check to see if we are still settimg up
+				if (_netStream == null) 
+				{
+					_waitingForInit = true;
+				}
+				else
+				{
+					initHandler(null);
+				}
+				
+				// Have a second timer for bad movies. If it has not loaded in XXX Seconds
+				// More to the next
+				_timeout = new Timer(PlayerConstants.TIME_OUT_SECONDS * 1000,1);
+				_timeout.addEventListener(TimerEvent.TIMER, timeoutHandler);	
+				_timeout.start();
+			}
+
+			public function stop():void
+			{
+				if (_netStream != null) {_netStream.play(null);	}
+				
+				if (_video.video != null) {_video.video.clear(); }
+			}
+			
+			private function initHandler(event:Event):void
+			{				
+				if (_waitingForInit)
+				{
+					_waitingForInit = false;
+					return;
+				}
+				
+				if (_stream)
+				{
+					_netStream.play(_streamUrl);
+				}
+				else
+				{
+					_netStream.play(_videoUrl);
+				}
+			}
+			
+			protected function removedFromStageHandler(event:Event):void
+			{
+				this.stop();
+			}
+			
+			private function statusHandler(event:SimpleStageVideoEvent):void
+			{
+				_timeout.stop();
+				
+				if (!debugMode) {return;}				
+				
+				lblStatus.text = "fullGPU:" + event.fullGPU.toString() + "\r\n"; 
+				lblStatus.text += "Compositing:" + event.hardwareCompositing.toString() + "\r\n";
+				lblStatus.text += "Decoding:" + event.hardwareDecoding.toString() + "\r\n";
+				lblStatus.text += "Status:" + event.status;
+			}
+			
+			private function timeoutHandler(event:TimerEvent):void
+			{
+				LogUtils.writeToLog("Timeout loading " + _urlFile,LogUtils.WARN);
+				
+				_endEventSubmitted = true;
+				this.dispatchEvent(new Event(VIDEO_END));
+				
+			}
+			
+			private function netStatusHandler(event:NetStatusEvent):void
+			{
+				if (event.info != null)
+				{
+					switch (event.info.code)
+					{
+						case "NetStream.Play.Start":
+							if (!_startEventSubmitted)
+							{	
+								_startEventSubmitted = true;
+								this.dispatchEvent(new Event(VIDEO_START));
+							}
+							break;
+						
+						case "NetStream.Buffer.Empty":
+						case "NetStream.Play.Stop":	
+							if (!_endEventSubmitted)
+							{
+								_endEventSubmitted = true;
+								this.dispatchEvent(new Event(VIDEO_END));
+							}
+							break;
+						
+						case "NetStream.Play.StreamNotFound":
+							// The video may be downloading right now
+							_missingMedia = true;
+							if (!_endEventSubmitted)
+							{
+								_endEventSubmitted = true;
+								this.dispatchEvent(new Event(VIDEO_END));
+							}
+							break;
+							
+						default:
+							// Ignore for now
+							break;
+					}
+				}				
+			}
+
+
+			
+		]]>
+	</fx:Script>
+	<s:SpriteVisualElement id="holder" />
+	<s:Label id="lblStatus" x="10" y="10" text="" width="125" height="55" 
+			 backgroundColor="#FFFFFF" fontFamily="Courier New" fontSize="10" visible="{debugMode}"/>
+</s:Group>

@@ -1,0 +1,907 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark"
+		 xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:view="com.stratoscreen.view.*"
+		 xmlns:components="com.stratoscreen.components.*"
+		 width="100%" height="100%" currentState="install"
+		 creationComplete="creationCompleteHandler(event)"  addedToStage="this_addedToStageHandler(event)">
+	<s:states>
+		<s:State name="install" enterState="installState_enterStateHandler(event)"/>
+		<s:State name="settings" enterState="settingsState_enterStateHandler(event)"/>
+		<s:State name="starting" activate="startingState_activateHandler(event)" enterState="state1_enterStateHandler(event)"/>
+		<s:State name="menu" activate="menuState_activateHandler(event)"  />
+	</s:states>
+	<fx:Declarations>
+		<mx:StringValidator id="validCode1" source="{txtCode1}" property="text" maxLength="5" minLength="5" />
+		<mx:StringValidator id="validCode2" source="{txtCode2}" property="text" maxLength="4" minLength="4" />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.PlayerConstants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.controller.InitializeAndSynchronize;
+			import com.stratoscreen.controls.AlertWindow;
+			import com.stratoscreen.controls.AlertWindowContainer;
+			import com.stratoscreen.events.RestartEvent;
+			import com.stratoscreen.events.StepEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.DataManager;
+			import com.stratoscreen.managers.TaskManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.ScreenSettings;
+			import com.stratoscreen.model.domains.Channels;
+			import com.stratoscreen.model.domains.Screens;
+			import com.stratoscreen.skins.ProgressBarSkin;
+			import com.stratoscreen.utils.*;
+			import com.stratoscreen.view.WinAbout;
+			
+			import mx.collections.ArrayCollection;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.IFocusManagerComponent;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+			
+			import spark.events.IndexChangeEvent;
+			import spark.events.TextOperationEvent;
+			
+			private static const MIN_START_SECONDS:int = 20;
+			public static const CHANNEL_START:String = "CHANNEL_START";
+			public static const CHANNEL_STOP:String = "CHANNEL_STOP";
+
+			[Bindable] private var _deviceName:String = "";
+			[Bindable] private var _statusLine:String = "";
+			[Bindable] private var _isAccelerated:Boolean;
+			[Bindable] private var _dataManager:DataManager;
+			[Bindable] private var _offline:Boolean = false;
+
+			private var _appManager:AppManager;
+			private var _taskManager:TaskManager;
+			private var _appStartTime:Date;
+			private var _settings:ScreenSettings;
+			private var _firstTimeInstall:Boolean = false;
+			private var _dataTimeOut:Boolean = false;
+			private var _root:File = null;
+			private var _appVersion:String;
+			private var _initSync:InitializeAndSynchronize;
+			private var _timerStart:Timer;
+			private var _pauseSeconds:int;
+			private var _userStop:Boolean = false;
+			private var _startupErrorFound:Boolean = false;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appStartTime = new Date();
+				_appManager = new AppManager(this.parentApplication as DisplayObject);
+				_appManager.addEventListener("offlineChange", offlineChangeHandler);
+				_dataManager = new DataManager(_appManager);
+				var temp:ScreenSettings = _dataManager.screenSettings; // Kick start the load of the saved object
+				
+				_taskManager = new TaskManager(_appManager, _dataManager);
+				_taskManager.addEventListener(RestartEvent.RESTART_PLAYER, restartPlayerHandler);
+				
+				// Set the Parent Application with the manager. This is the easiest way for the other
+				// components to get access
+				this.parentApplication.setManagers(_appManager, _dataManager, _taskManager);
+				
+				_isAccelerated = _appManager.isAccelerated;
+				txtCode1.text = "";
+				txtCode2.text = "";
+				
+				LogUtils.logsFolder = _appManager.logsFolder();
+				LogUtils.writeToLog("Player server started", LogUtils.INFO);
+				LogUtils.writeToLog("App Root folder:" + _appManager.rootAppPath, LogUtils.DEBUG);
+				LogUtils.writeToLog("Docs Root folder:" + _appManager.rootDocsPath, LogUtils.DEBUG);
+												
+				// Complete the setup of the application
+				// I am getting occasions where the ScreenSettings is not null but the buckets are
+				// This is probably a new dev thing...
+				_settings = _dataManager.screenSettings;
+				if (_settings == null || _settings.webBucket == null || _settings.accountBucket == null ) 
+				{
+					LogUtils.writeToLog("ScreenSettings are null. Assuming new installation", LogUtils.INFO);
+					
+					// Show the register window
+					_firstTimeInstall = true;
+					this.currentState = "install";
+					_settings = new ScreenSettings();
+				}
+				else
+				{						
+					this.currentState = "starting";
+					
+					// Set up the SecurityUtils. We need this before we can decrypt
+					SecurityUtils.installCode = _settings.webBucket;
+					SecurityUtils.accountCode = _settings.accountBucket;
+
+					// Set the AppManager. VERY important
+					_appManager.regionId = _settings.regionId;
+					_appManager.accountBucket = _settings.accountBucket;
+					_appManager.accessKey = SecurityUtils.simpleDecrypt(_settings.encryptedAccessKey, SecurityUtils.INSTALL_KEY);
+					_appManager.secretKey = SecurityUtils.simpleDecrypt(_settings.encryptedSecretKey, SecurityUtils.INSTALL_KEY);
+					
+					// Use the timer to post the sync controller
+					var timer:Timer = new Timer(100, 1);
+					timer.addEventListener(TimerEvent.TIMER, syncAndDownload);
+					timer.start();	
+				}
+			}
+
+			public function get isStarting():Boolean
+			{
+				// We may have two items in the start up process
+				// The initSync and the pause timer
+				var starting:Boolean = false;
+				if (_initSync != null && _initSync.isRunning) {starting = true;} 
+				
+				if (!starting && _timerStart != null && _timerStart.running) {starting = true;}
+					
+				return starting;
+			}
+			
+			public function stopStarting():void
+			{
+				_userStop = true;
+				if (_initSync != null && _initSync.isRunning) 
+				{
+					_initSync.stop();
+				}	
+				
+				if (_timerStart != null) {_timerStart.stop(); }
+			}
+			
+			protected function this_addedToStageHandler(event:Event):void
+			{
+				this.stage.addEventListener(KeyboardEvent.KEY_DOWN, stageKeyDownHandler);			
+			}
+			
+			protected function stageKeyDownHandler(event:KeyboardEvent):void
+			{
+				// Forgive the hard coding
+				// but we have to intercept messages from the Alert Box
+				if (event.target is Button)
+				{
+					if (event.target.name.indexOf("btnAlert") == 0)
+					{
+						event.preventDefault();
+						event.stopPropagation();
+						return;
+					}
+				}
+				
+				if (event.target is AlertWindowContainer)
+				{
+					event.preventDefault();
+					event.stopPropagation();
+					return;
+				}					
+
+				if (this.currentState == "settings")
+				{
+					switch (event.keyCode)
+					{
+						case Keyboard.UP:
+						case Keyboard.LEFT:
+							groupSettings.focusManager.setFocus(groupSettings.focusManager.getNextFocusManagerComponent(true));							
+							break;
+						
+						case Keyboard.DOWN:
+						case Keyboard.RIGHT:
+							groupSettings.focusManager.setFocus(groupSettings.focusManager.getNextFocusManagerComponent());
+							break;
+					}
+				}	
+				
+				else if (this.currentState == "install")
+				{
+					var component:IFocusManagerComponent = groupInstall.focusManager.getFocus();
+					var getNext:Boolean = true;	// get the next component
+					
+					switch (event.keyCode)
+					{
+						case Keyboard.LEFT:
+							getNext = false;	// get the last component
+							
+						case Keyboard.RIGHT:
+							if (component is spark.components.TextInput)
+							{
+								var textInput:spark.components.TextInput = component as spark.components.TextInput;
+								if (textInput.selectionActivePosition == 0) 
+								{
+									getNext = !getNext;
+								}
+								else if (textInput.selectionActivePosition >= textInput.maxChars) 
+								{
+									// DO not flip the direction it should be OK
+								}
+								else
+								{
+									// We are going back and forth inside the text box do nothing
+									return;
+								}
+							}
+							else
+							{
+								// Reserve left and right for the text boxes
+								return;
+							}
+							
+							// Toggle between the two text boxes
+							Object(component).name == txtCode1.name ? txtCode2.setFocus() : txtCode1.setFocus()
+
+							break;
+						
+						case Keyboard.UP:
+							if (component is spark.components.Button) {txtCode1.setFocus();}
+							break;
+							
+						case Keyboard.DOWN:
+							if (component is spark.components.TextInput) {btnInstall.setFocus();}
+							break;
+							
+					}
+				}
+			}
+
+
+			protected function startingState_activateHandler(event:Event):void
+			{
+				if (progressBarMedia != null)
+				{
+					progressBarMedia.visible = false;
+					progressBarMedia.value = 0;
+				}
+			}
+
+			protected function state1_enterStateHandler(event:FlexEvent):void
+			{
+				lblInterupt.visible = this.parentApplication.deviceType == Screens.DEVICE_ANDROID;
+			}
+
+			protected function menuState_activateHandler(event:Event):void
+			{
+			}
+						
+			private function syncAndDownload(event:Event = null):void
+			{
+				this.currentState = "starting";
+				_dataTimeOut = false;
+				_userStop = false;
+				_startupErrorFound = false;
+				
+				if (progressBarMedia != null)
+				{
+					progressBarMedia.visible = false;
+					progressBarMedia.value = 0;
+				}
+				
+				_initSync = new InitializeAndSynchronize(_appManager, _dataManager, _firstTimeInstall, this.parentApplication.deviceType );				
+				_initSync.addEventListener(StepEvent.STEP_EVENT, stepEventHandler);		
+				_initSync.addEventListener(ProgressEvent.PROGRESS, initSyncProgressHandler);
+				_initSync.start();				
+			}
+			
+			private function stepEventHandler(event:StepEvent):void
+			{				
+				progressBar.value = event.percent;
+				progressBar.maximum = 1;
+				
+				switch (event.status)
+				{
+					case StepEvent.INFO:
+						_statusLine = event.message;
+						
+						if (popupSync != null && popupSync.displayPopUp)
+						{
+							lblStatusLines.text = _statusLine + "\r\n" + lblStatusLines.text;
+						}
+						
+						break;
+
+					// The local data must of been wiped out. STart fresh
+					case StepEvent.NOT_REGISTERED:
+					case StepEvent.USED_CODE:
+						_firstTimeInstall = true;
+						this.currentState = "install";
+						if (event.status == StepEvent.USED_CODE)
+						{
+							new AlertWindow("This code has already been used on a different device.\r\n" +
+								            "Please please contact customer support for assistance.", 
+											"Invalid Activation Code");
+						}
+						break;
+					
+					case StepEvent.INVALID_CODE:
+						_firstTimeInstall = true;
+						this.currentState = "install";
+						txtCode2.errorString = "Invalid Code";
+						txtCode2.setFocus();
+						
+						new AlertWindow("Invalid Activation Code",	"Invalid Activation Code");
+						break;
+
+					case StepEvent.CHANNEL_READY:
+						// Start the channel. We may have a few more tasks
+						// i.e. Uploading Reports
+						// 
+						// PS. Make sure this is submitted once.
+						_firstTimeInstall = false;
+						if (!_userStop) {initSyncChannelReadyHandler();}
+						break;
+
+					case StepEvent.USED_CODE:
+						_statusLine = "";
+						_firstTimeInstall = true;
+						this.currentState = "install";
+						break;
+					
+					case StepEvent.COMPLETE:
+						if (progressBarMedia.visible)
+						{
+							progressBarMedia.value = 0;
+						}
+						break;
+					
+					case StepEvent.OFFLINE:
+						// Just play what we have stored locally
+						// We may come back on line later
+						if (_firstTimeInstall)
+						{
+							new AlertWindow("Could not connect to the internet. Please restart and try again", "Connect Error");
+						}
+						else
+						{
+							initSyncChannelReadyHandler();
+						}
+						break;
+					
+					case StepEvent.ERROR:
+						_initSync.manuallyStarted = false;
+						
+						if (!_startupErrorFound)
+						{
+							_startupErrorFound = true;
+
+							var message:String = "Error found while starting. Defaulting to Offline Mode\r\n";
+							message += "\r\n\r\n" + event.message;
+							new AlertWindow(message, "Error Found", false, null, null, true);
+
+							_appManager.offline = true;
+							initSyncChannelReadyHandler();
+						}
+						
+						break;
+				}
+			}
+			
+			private function initSyncChannelReadyHandler(skipSecondsTest:Boolean = false):void
+			{				
+				// Watch for a load that is too fast
+				// We want at least 10 seconds
+				if (!skipSecondsTest)
+				{
+					var startMilli:Number = (new Date()).time - _appStartTime.time;
+					_pauseSeconds = MIN_START_SECONDS - startMilli / 1000;
+					if (_pauseSeconds > 0)
+					{
+						_timerStart = new Timer(250);
+						_timerStart.addEventListener(TimerEvent.TIMER, timerStartHandler);
+						_timerStart.start();
+						return;
+					}
+				}
+				
+				lblOffline.text = "";
+				
+				if (_initSync.manuallyStarted)
+				{
+					_initSync.manuallyStarted = false;
+					if (popupSync.displayPopUp)
+					{
+						popupSync.displayPopUp = false;
+					}
+					
+					return;
+				}
+				
+				// Everything is downloaded and we are ready to start
+				// We will assume that if we are offline we have enought to run the channels				
+				if (_initSync.success || _appManager.offline)
+				{
+					_taskManager.start();	// Start the scheduled tasks
+					_userStop = false;
+					this.dispatchEvent(new Event(CHANNEL_START)); // start the plater
+				}
+				else
+				{
+					// The Screen was probably deleted from the Storyboard
+					if (!_initSync.screenRegistered)
+					{
+						// Retry the registration
+						_firstTimeInstall = true;
+						_initSync.start();
+					}
+					else
+					{
+						// We got issues!!
+						trace("Crud!");
+					}
+				}
+			}
+			
+			private function initSyncProgressHandler(event:ProgressEvent):void
+			{
+				progressBarMedia.visible = true;
+				progressBarMedia.maximum = event.bytesTotal;
+				progressBarMedia.value = event.bytesLoaded;
+			}
+			
+			private function timerStartHandler(event:TimerEvent):void
+			{
+				if (_userStop) 
+				{
+					_timerStart.stop();
+					return;
+				}
+				
+				// Assume the timer delay is less than one second
+				var perSecond:Number = 1000 / _timerStart.delay;
+				
+				var seconds:Number = Math.floor( (_pauseSeconds * perSecond - _timerStart.currentCount) / perSecond);
+				_statusLine = "Player will start in " + int(1 + seconds);
+				
+				if (_timerStart.currentCount > _pauseSeconds * perSecond )
+				{
+					_statusLine = "";
+					_timerStart.stop();
+					initSyncChannelReadyHandler(true);
+				}
+				
+				progressBar.maximum = _pauseSeconds * perSecond;
+				progressBar.value = _timerStart.currentCount;
+			}
+			
+			protected function txtCode1_changeHandler(event:TextOperationEvent):void
+			{
+				if (txtCode1.text.length == 5) {txtCode2.setFocus();}
+			}
+			
+			
+			protected function txtCode2_changeHandler(event:TextOperationEvent):void
+			{
+				if (txtCode2.text.length == 4) {btnInstall.setFocus();}
+			}
+
+			
+			protected function link_clickHandler(event:MouseEvent):void
+			{
+				navigateToURL(new URLRequest("http://www.stratoscreen.com"));
+			}
+			
+			protected function btnInstall_clickHandler(event:MouseEvent = null):void
+			{
+				txtCode1.text = txtCode1.text.toUpperCase();
+				txtCode2.text = txtCode2.text.toUpperCase();
+				var message:String = "";
+				var result:ValidationResultEvent = validCode1.validate();
+				if (result.results != null)  {message = result.message;}
+				
+				result = validCode2.validate();
+				if (result.results != null)  {message = result.message;}				
+				
+				if (message != "") 
+				{					
+					new AlertWindow(message, "Invalid Code", false, null, retryHandler);
+					this.enabled = true;
+					return;
+				}
+				
+				// check for a valid key. Assume it starts with a A
+				var index:int =  txtCode1.text.toUpperCase().charCodeAt(0) - 64;	// 65 = 'A'
+				if (index < 1 || index >= AWSRegions.endpoints.length) 
+				{
+					txtCode1.errorString = "Invalid Code";
+					txtCode2.errorString = txtCode1.errorString;
+					new AlertWindow(txtCode1.errorString, "Invalid Code", false, null, retryHandler);
+				}
+				
+				_appManager.accountBucket = txtCode1.text.toUpperCase();	// Remeber the bucket too
+				_settings.webBucket =  _appManager.accountBucket;
+				_settings.code = txtCode2.text.toUpperCase();
+				
+				// build the url for the signon package
+				var endpoint:AWSEndpoint = AWSRegions.getAWSEndpoint(index);
+				
+				var url:String = "https://" + endpoint.s3 + "/" + txtCode1.text.toLowerCase()  + "/" + txtCode1.text.toLowerCase();
+				var loader:URLLoader = new URLLoader();
+				loader.addEventListener(Event.COMPLETE, pkgHandler);
+				loader.addEventListener(SecurityErrorEvent.SECURITY_ERROR, pkgErrorHandler);
+				loader.addEventListener(IOErrorEvent.IO_ERROR, pkgErrorHandler);
+				loader.load(new URLRequest(url));
+				
+				this.enabled = false;
+			}
+
+			private function pkgHandler(event:Event):void
+			{
+				try
+				{
+					const DELIMETER:String = "\t";
+				
+					// Set the security for decryption based on the code
+					SecurityUtils.accountCode = _appManager.accountBucket;
+					
+					var pkg:String = event.target.data;
+					pkg = SecurityUtils.simpleDecrypt(pkg, SecurityUtils.ACCOUNT_KEY);
+					
+					// Split up the 
+					var sections:Array = pkg.split(DELIMETER);
+					
+					// We should have the main web bucket in the 5th section of the string
+					var webBucket:String = sections[4];
+					webBucket = SecurityUtils.simpleDecrypt(webBucket, SecurityUtils.ACCOUNT_KEY);
+					SecurityUtils.installCode = webBucket;
+					
+					_appManager.regionId = parseInt(sections[0]);
+					if (_appManager.regionId == 0) {throw new Error("Invalid region id in sign on package");}
+					
+					var accessKey:String = SecurityUtils.simpleDecrypt(sections[1], SecurityUtils.INSTALL_KEY);
+					if (accessKey == null || accessKey == "") {throw new Error("Invalid access key in sign on package");}
+					
+					var secretKey:String = SecurityUtils.simpleDecrypt(sections[2], SecurityUtils.INSTALL_KEY);
+					if (secretKey == null || secretKey == "") {throw new Error("Invalid secret key in sign on package");}					
+					
+					var accountId:String =SecurityUtils.simpleDecrypt(sections[3], SecurityUtils.ACCOUNT_KEY);
+					if (accountId == null || accountId == "") {throw new Error("Invalid account id in sign on package");}					
+					
+					// Setup the Application object
+					// We'll need the keys for AWS commans
+					_appManager.accessKey = accessKey;
+					_appManager.secretKey = secretKey;
+					
+					// Save the settings for future use	
+					_settings.regionId = _appManager.regionId;
+					_settings.webBucket = webBucket;
+					_settings.accountBucket = _appManager.accountBucket;
+					_settings.encryptedAccessKey = sections[1];
+					_settings.encryptedSecretKey = sections[2];
+					_settings.accountId = accountId;
+					_dataManager.screenSettings = _settings;
+					
+					syncAndDownload();
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					new AlertWindow("Could not load signon package", "Error");		
+				}
+				finally
+				{
+					this.enabled = true;
+				}
+			}
+			
+			private function retryHandler(event:Event = null):void
+			{
+				_settings = new ScreenSettings;
+			}
+			
+			private function pkgErrorHandler(event:Event):void
+			{
+				this.enabled = true;
+				new AlertWindow("Could not load signon package", "Error", false, null, retryHandler);
+			}
+
+
+			protected function btnCancel_clickHandler(event:MouseEvent):void
+			{
+				this.currentState = "menu";
+			}
+						
+
+			protected function settingsState_enterStateHandler(event:FlexEvent):void
+			{
+				_statusLine = "";
+				
+				radLetterBox.selected = _dataManager.screen_.viewMode == Constants.VIEW_LETTERBOX;
+				radStretch.selected = _dataManager.screen_.viewMode == Constants.VIEW_STRETCH;
+				radFull.selected = _dataManager.screen_.viewMode == Constants.VIEW_FULL;
+				
+				chkVideoDebug.selected = _dataManager.screenSettings.videoDebug;
+				chkUseAccel.selected = _dataManager.screenSettings.useAccel;
+				_deviceName = _dataManager.screen_.name;
+				
+				groupSettings.focusManager.setFocus(radLetterBox);
+				groupSettings.focusManager.showFocusIndicator = true;
+			}
+			
+			protected function installState_enterStateHandler(event:FlexEvent):void
+			{
+			  this.callLater(txtCode1.setFocus);	
+			}
+			
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				// Save the View Mode to the table
+				var viewMode:String = _dataManager.screen_.viewMode;
+				if (radLetterBox.selected) {viewMode = Constants.VIEW_LETTERBOX;}
+				if (radStretch.selected) {viewMode = Constants.VIEW_STRETCH;}
+				if (radFull.selected) {viewMode = Constants.VIEW_FULL;}
+				
+				_dataManager.screen_.viewMode = viewMode;
+				_dataManager.screenSettings.videoDebug = chkVideoDebug.selected ;
+				_dataManager.screenSettings.useAccel = chkUseAccel.selected ;
+				_dataManager.commit(1);
+				
+				this.currentState = "menu";
+			}
+			
+			
+			protected function btnDelete_clickHandler(event:MouseEvent):void
+			{
+				var count:int = _dataManager.filesManager.deleteUnusedMedia();	
+				new AlertWindow(count + " unused media files removed.", "Delete Unused Media", false, null, null, true); 
+			}
+			
+			protected function progressBar_clickHandler(event:MouseEvent):void
+			{
+				this.currentState = "menu";
+				stopStarting();
+			}
+			
+			protected function btnSync_clickHandler(event:MouseEvent):void
+			{
+				popupSync.displayPopUp = true;
+				lblStatusLines.text = "";
+				
+				_initSync.manuallyStarted = true;
+				_initSync.start();
+			}
+			
+			public function playChannel(channelId:String):void
+			{
+				updateUserChannelDetail(channelId);
+				syncAndDownload();
+			}
+			
+			private function restartPlayerHandler(event:RestartEvent):void
+			{
+				// If am updateNow was passed, erase what ever the user is playing
+				// and show what was requested
+				if (event.updateNow) {updateUserChannelDetail("");}
+				
+				stopStarting();
+				this.callLater(syncAndDownload);
+				
+				this.dispatchEvent(new Event(CHANNEL_STOP)); // start the plater				
+			}
+			
+			private function updateUserChannelDetail(channelId:String):void
+			{
+				SharedUtils.setValue(PlayerConstants.USER_CHANNEL_ID, channelId);
+				
+				_dataManager.screenDetail.userChannelId = channelId;
+				_dataManager.commitTable(_dataManager.screenDetail);
+				
+				// Update the DB too
+				_dataManager.screenDetail.updated = true;
+				_appManager.sdb.updateDomain([_dataManager.screenDetail], updateScheduleHandler);	
+			}
+			
+			private function updateScheduleHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					LogUtils.writeToLog("Could not update screen detail after channel change. " + event.message, LogUtils.WARN);
+				}
+			}
+			
+			private function channelSelect_createCompleteHandler(event:Event):void
+			{
+				channelSelect.addEventListener(ChannelSelect.CHANNEL_SELECTED, channelSelectHandler);
+			}
+			
+			private function channelSelectHandler(event:Event):void
+			{
+				var channelId:String = channelSelect.selectedChannel.itemName;
+				this.playChannel(channelId);
+			}
+																 			
+			protected function radioCheckClick_clickHandler(event:MouseEvent):void
+			{
+				radLetterBox.selected = event.currentTarget == radLetterBox;
+				radStretch.selected = event.currentTarget == radStretch;
+				radFull.selected = event.currentTarget == radFull;
+			}
+			
+			private function offlineChangeHandler(event:Event):void
+			{
+				_offline = _appManager.offline;
+			}
+			
+			
+			
+		]]>
+	</fx:Script>
+	<s:Rect id="rectBackground" width="100%" height="100%">
+		<s:stroke>
+			<s:SolidColorStroke color="#404040" weight="1"/>
+		</s:stroke>       
+		<s:fill>
+			<s:LinearGradient rotation="-45">
+				<s:GradientEntry color="#404040" />
+				<s:GradientEntry color="#666666" />
+				<s:GradientEntry color="#404040" />
+			</s:LinearGradient>
+		</s:fill>
+	</s:Rect>
+	
+	<s:Group horizontalCenter="0" verticalCenter="0"			 
+			 left="50" right="50" top="50" bottom="50">
+		<s:SWFLoader x="0" y="0" source="@Embed('/assets/swfs/strato.swf')" width="95" height="75" />
+		<s:VGroup x="99" y="4" horizontalAlign="center">
+			<s:Label text="StratoScreen" color="#9DB6E1" fontSize="30" fontWeight="bold" fontFamily="Verdana"/>
+			<s:Label text="cloud based digital signage" fontSize="16" fontWeight="bold" color="#F0F0F0" fontFamily="Arial"/>
+			<s:Label buttonMode="true" click="link_clickHandler(event)" color="#9DB6E1"
+					 fontFamily="Arial" fontWeight="bold" tabEnabled="true"
+					 text="http://www.stratoscreen.com" textDecoration="underline" useHandCursor="true"
+					 x.settings="104"/>		
+		</s:VGroup>
+		<s:Label id="lblName" right="10" top="10" color="#E0E0E0" fontFamily="Verdana"
+				 fontSize="16" fontWeight="bold" text="{_deviceName}" textAlign="right" includeIn="settings"/>
+		
+		<!-- Install Group -->
+		<s:Group id="groupInstall" left="5" top="100" bottom="0" right="0" includeIn="install" >
+			<s:Label y="0" color="#FFFFFF" fontFamily="Arial" fontSize="18" left="0" right="0">
+				<s:text>Thank you for installing the StratoScreen Player. </s:text>
+			</s:Label>
+			<s:Label y="40" color="#FFFFFF" fontFamily="Arial" fontSize="18" left="0" right="0">
+				<s:text>Please enter the Screen Install Code to link this device with your StratoScreen account</s:text>
+			</s:Label>
+			
+			<s:HGroup horizontalCenter="0" verticalAlign="middle" verticalCenter="15" hasFocusableChildren="true">
+				<s:TextInput id="txtCode1" width="120" height="45"
+							 change="txtCode1_changeHandler(event)" fontFamily="Courier New"
+							 fontSize="30" fontWeight="bold" maxChars="5" restrict="a-zA-Z0-9"
+							 skinClass="com.stratoscreen.skins.TextInput" styleName="activateInput"
+							 tabEnabled="true" tabIndex="1" text="ABCDE" textAlign="center"
+							 typographicCase="uppercase" focusIn="{txtCode1.selectRange(0,0)}"/>
+				<s:Label fontFamily="Courier New" fontSize="30" fontWeight="bold" text="-" color="#FFFFFF"/>
+				<s:TextInput id="txtCode2" width="130" height="45"
+							 change="txtCode2_changeHandler(event)" fontFamily="Courier New"
+							 fontSize="30" fontWeight="bold" maxChars="4" restrict="a-zA-Z0-9"
+							 skinClass="com.stratoscreen.skins.TextInput" styleName="activateInput"
+							 tabEnabled="true" tabIndex="2" text="ZYXWV" textAlign="center"
+							 typographicCase="uppercase" focusIn="{txtCode1.selectRange(0,0)}"/>			
+			</s:HGroup>
+			
+			<s:Button id="btnInstall" right="10" bottom="10" label="Install"
+					  click="btnInstall_clickHandler()" tabIndex="3" tabEnabled="true"/>
+			
+		</s:Group>
+		
+		<s:Group id="groupMain" left="0" top="100" bottom="0" right="0" includeIn="starting">
+			<s:VGroup gap="18" horizontalAlign="center" horizontalCenter="0" verticalAlign="middle"
+					  verticalCenter="0" >
+				<s:Label color="#E0E0E0" fontFamily="Arial" fontSize="14" fontStyle="italic"
+						 text="{_statusLine}" width="100%"/>
+
+				<components:ProgressBar id="progressBar" click="progressBar_clickHandler(event)"
+										skinClass="com.stratoscreen.skins.ProgressBarSkin"
+										tabEnabled="true" tabIndex="2" />
+
+				<components:ProgressBar id="progressBarMedia" click="progressBar_clickHandler(event)"
+										skinClass="com.stratoscreen.skins.ProgressBarMediaSkin"
+										tabEnabled="true" tabIndex="2" visible="false" />
+
+				<s:Spacer />
+				<s:Label id="lblInterupt" color="#C0C0C0" fontFamily="Arial" fontSize="18" fontStyle="italic"
+						 tabEnabled="true" tabIndex="3" text="Press menu to interupt"/>
+			</s:VGroup>
+		</s:Group>
+		
+
+		
+		<!-- Settings Group -->
+		<s:Group id="groupSettings" includeIn="settings"  left="5" right="0" top="100" bottom="0">
+			<s:Label x="7" y="6" styleName="header" text="View Mode"/>
+			<s:VGroup x="30" y="40">
+				<!-- The table enabled is not working. Use a check box for now -->
+				<s:CheckBox id="radLetterBox" label="Letterbox" tabEnabled="true" tabIndex="1" 
+							click="radioCheckClick_clickHandler(event)"/>
+				<s:CheckBox id="radStretch" label="Stretch" tabEnabled="true" tabIndex="2"
+							click="radioCheckClick_clickHandler(event)"/>
+				<s:CheckBox id="radFull" label="Full"  tabEnabled="true" tabIndex="3"
+							click="radioCheckClick_clickHandler(event)"/>
+			</s:VGroup>
+
+			<s:Label x="312" y="6" styleName="header" text="Actions"/>
+			<s:VGroup x="312" y="40">
+				<s:Button id="btnDelete" label="Delete Unused Media"
+						  click="btnDelete_clickHandler(event)" fontWeight="bold" tabEnabled="true"
+						  tabIndex="6"/>
+				<s:Spacer height="10" />
+				<s:Button id="btnSync" width="{btnDelete.width}" label="Syncronize " visible="false"
+						  click="btnSync_clickHandler(event)" fontWeight="bold" tabEnabled="true"
+						  tabIndex="5"/>
+
+			</s:VGroup>
+
+			
+			<s:Label x="9" y="171" text="Advanced Options" styleName="header"/>
+			<s:VGroup x="30" y="200">
+				<!-- Disabled -->
+				<s:CheckBox id="chkVideoDebug" x="35" y="211" label="Video Debug" tabEnabled="true"
+							tabIndex="4" />
+				<s:CheckBox id="chkUseAccel" x="35" y="211" visible="false"
+							label="Use Hardware Acceleration when available"
+							enabled="{_isAccelerated}" fontSize="18" tabEnabled="true" tabIndex="4"/>
+				
+				<s:Spacer height="10" />
+				
+			</s:VGroup>
+			
+			<s:Button id="btnCancel" right="126" bottom="10" label="Cancel"
+					  click="btnCancel_clickHandler(event)" tabEnabled="true" tabIndex="6"/>
+
+			<s:Button id="btnSave" right="10" bottom="10" label="Save" chromeColor="#70FF70"
+					  click="btnSave_clickHandler(event)" focusColor="#D6FFD6" tabEnabled="true"
+					  tabIndex="7"/>
+		</s:Group>
+		
+		<!-- Show the sync in a window for the manual sync -->
+		<s:PopUpAnchor id="popupSync" includeIn="settings"  width="300" height="400"
+					   horizontalCenter="0"  verticalCenter="0">
+			<s:BorderContainer borderWeight="2" width="300" height="400">
+				<s:layout>
+					<s:VerticalLayout horizontalAlign="center"/>
+				</s:layout>
+				
+				<s:BorderContainer width="100%" backgroundColor="#404040" dropShadowVisible="false">
+					<s:layout>
+						<s:VerticalLayout horizontalAlign="center" paddingBottom="5" paddingLeft="10" paddingRight="10" paddingTop="5" />
+					</s:layout>
+					<s:Label height="100%" color="#FFFFFF" text="Synchronizing" textAlign="center"
+							 verticalAlign="middle"/>
+				</s:BorderContainer>
+				
+				<s:VGroup  paddingBottom="5" paddingLeft="5" paddingRight="5" paddingTop="5" height="100%" width="100%">
+					<s:BorderContainer height="100%" width="100%">
+						<s:Group height="100%" width="100%" clipAndEnableScrolling="true" >
+							<s:Label id="lblStatusLines" left="2" right="2" top="2" bottom="2"
+									 color="#404040" fontFamily="Courier New" fontSize="12"
+									 fontStyle="italic" verticalAlign="top"/>	
+						</s:Group>					
+					</s:BorderContainer>
+				</s:VGroup>
+				<s:Button id="btnHide" click="{popupSync.displayPopUp = false}" label="Hide" 
+						  tabEnabled="true" tabIndex="10" />
+				<s:Spacer height="5" />
+			</s:BorderContainer>
+		</s:PopUpAnchor>
+		
+		<!-- Menu Group -->
+		<s:Group id="groupMenu" includeIn="menu"  left="5" right="0" top="100" bottom="0" >
+			<s:Label x="7" y="6" text="Select Channel" styleName="header"/>
+			
+			<view:ChannelSelect id="channelSelect" dataManager="{_dataManager}" horizontalCenter="0" 
+								visible.menu="true" visible.install="false" visible.settings="false" visible.starting="false"
+								verticalCenter="0" creationComplete="channelSelect_createCompleteHandler(event)"/>
+		</s:Group>
+	</s:Group>
+	
+	<s:HGroup left="50" right="50" bottom="25" >
+		<s:Spacer width="100%" />
+		<s:Label id="lblDebug" color="#800000" fontFamily="Arial" fontSize="14"
+				 text.menu=" "/>
+		<s:Label id="lblOffline" color="#C00000" fontFamily="Arial" fontSize="14"
+				 fontWeight="bold" text="OFFLINE " visible="{_offline}"/>
+		
+		<s:Label fontFamily="Arial" fontSize="14" color="#ffffff" text="{_isAccelerated ? 'accelerated' : ''}"/>
+	</s:HGroup>
+
+
+</s:Group>

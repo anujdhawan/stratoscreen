@@ -1,0 +1,305 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:HGroup xmlns:fx="http://ns.adobe.com/mxml/2009"
+		  xmlns:s="library://ns.adobe.com/flex/spark"
+		  xmlns:mx="library://ns.adobe.com/flex/mx"
+		  addedToStage="this_addedToStageHandler(event)"
+		  creationComplete="this_creationCompleteHandler(event)" gap="10" horizontalAlign="center"
+		  show="this_showHandler(event)" hide="this_hideHandler(event)" verticalAlign="middle">
+	<fx:Declarations>
+		<s:GlowFilter id="glowSelected" color="#E7B96F" blurX="12" blurY="12" quality="4" strength="2" alpha="1" />
+		<s:Parallel id="slideOut">
+			<s:Move id="moveOut" effectEnd="moveOut_effectEndHandler(event)"  />
+			<s:Fade alphaFrom="1" alphaTo="0"  />
+		</s:Parallel>
+		<s:Parallel id="slideIn">
+			<s:Move id="moveIn" effectEnd="moveIn_effectEndHandler(event)" />
+			<s:Fade alphaFrom="0" alphaTo="1" />
+		</s:Parallel>
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.DataManager;
+			import com.stratoscreen.model.domains.Channels;
+			import com.stratoscreen.renderers.ChannelItem;
+			import com.stratoscreen.utils.*;
+			
+			import mx.collections.ArrayCollection;
+			import mx.events.EffectEvent;
+			import mx.events.FlexEvent;
+			
+			import spark.components.supportClasses.ItemRenderer;
+
+			public static const SELECTION_CHANGE:String = "SELECTION_CHANGE";
+			public static const CHANNEL_SELECTED:String = "CHANNEL_SELECTED";
+			public var dataManager:DataManager;
+			public var selectedChannelId:String;
+			
+			private const COLUMN_COUNT:int = 3;
+			
+			[Bindable] private var _channelRow:ArrayCollection;
+			[Bindable] private var _canChange:Boolean;
+			
+			private var _channels:ArrayCollection;
+			private var _selectedIndex:int = -1;
+			private var _row:int = 0;
+			private var _lastDirection:int;
+			private var _selectedChannel:Channels;
+			private var _visible:Boolean;
+
+			public override function set visible(value:Boolean):void
+			{
+				super.visible = value;
+				_visible = value;
+			}
+			
+			public function get rightButtonSelected():Boolean
+			{
+				if (!btnRight.visible) {return false;}
+				return btnRight.filters.length > 0;
+			}
+
+			public function get leftButtonSelected():Boolean
+			{
+				if (!btnLeft.visible) {return false;}
+				return btnLeft.filters.length > 0;
+			}
+			
+			public function get selectedChannel():Channels
+			{
+				return _selectedChannel;
+			}
+			
+			public function playChannel(id:String):void
+			{
+				for (var i:int = 0; i < _channels.length; i++)
+				{
+					if (_channels[i].itemName == id)
+					{
+						_selectedChannel =_channels[i];
+						break;
+					}
+				}
+								
+				this.dispatchEvent(new Event(CHANNEL_SELECTED));
+			}
+
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				_canChange = dataManager.screen_.userControl == "1";
+				buildChannelArray();
+			}
+			
+			protected function this_showHandler(event:FlexEvent):void
+			{
+				_canChange = dataManager.screen_.userControl == "1";
+				buildChannelArray();
+			}
+			
+			protected function this_hideHandler(event:FlexEvent):void
+			{
+				_selectedIndex = -1;
+			}
+
+
+			protected function this_addedToStageHandler(event:Event):void
+			{
+				this.stage.addEventListener(KeyboardEvent.KEY_DOWN, stage_keyDownHandler);			
+			}
+
+			private function stage_keyDownHandler(event:KeyboardEvent):void
+			{
+				trace(_visible);
+				if (!_visible) {return;}
+				
+				switch (event.keyCode)
+				{
+					// Only use the up and down if the user has not selected anything
+					case Keyboard.UP:
+						if (_selectedIndex < 0)	{_selectedIndex = 1;}
+						highlightItem();
+						break;
+					
+					case Keyboard.DOWN:
+						if (_selectedIndex < 0)	{_selectedIndex = _channelRow.length}
+						highlightItem();
+						break;
+					
+					case Keyboard.LEFT:
+						_selectedIndex --;
+						if (_selectedIndex < 0) {_selectedIndex = _channelRow.length + 1}	// Wrap around
+						highlightItem(-1);
+						break;
+					
+					case Keyboard.RIGHT:
+						_selectedIndex ++;
+						if (_selectedIndex > _channelRow.length + 1) {_selectedIndex = 0}	// Wrap around						
+						highlightItem();
+						break;
+					
+					case Keyboard.ENTER:
+						enterHandler();
+						break;
+				}
+				
+			}
+			
+			private function buildChannelArray():void
+			{
+				if (_canChange)
+				{
+					// The user can change the channel
+					var tempArray:Array = Utils.clone(dataManager.channels);	
+					_channels = new ArrayCollection(tempArray);
+				}
+				else
+				{
+					_channels = new ArrayCollection();
+				}				
+				
+				// Add a default channel at the top
+				var channel:Channels = new Channels();
+				channel.itemName = "";
+				channel.name = "Default Channel";
+				_channels.addItemAt(channel, 0);	
+				
+				buildChannelRowArray();
+			}
+			
+			private function buildChannelRowArray():void
+			{
+				var startIndex:int = _row * COLUMN_COUNT;
+				var endIndex:int = startIndex + COLUMN_COUNT;
+				if (endIndex > _channels.length) {endIndex = _channels.length;}
+
+				_channelRow = new ArrayCollection();
+				for (var i:int = startIndex; i < endIndex; i++)
+				{
+					_channelRow.addItem(_channels[i]);
+				}
+			}
+			
+			private function highlightItem(direction:int = 1):void
+			{
+				// UnHighlight Everything first 
+				btnLeft.filters = [];
+				btnRight.filters = []
+				
+				if (!_canChange) // No need to worry. They have one option. Play 
+				{
+					_selectedIndex = 1;
+				}	
+				
+				if (_selectedIndex == 0)
+				{
+					if (btnLeft.visible)
+					{
+						btnLeft.filters = [glowSelected];
+						selectedChannelId = "btnLeft";
+					}
+					else
+					{
+						_selectedIndex += direction;	// SKip if not visible
+						return;
+					}
+				}
+				else if (_selectedIndex > 0 && _selectedIndex <= _channelRow.length)
+				{
+					selectedChannelId = _channelRow[_selectedIndex-1].itemName;
+				}
+				else
+				{
+					if (btnRight.visible)
+					{						
+						btnRight.filters = [glowSelected];
+						selectedChannelId = "btnRight";
+					}
+					else
+					{
+						_selectedIndex += direction; // SKip if not visible
+						return;
+					}
+				}
+				
+				this.dispatchEvent(new Event(SELECTION_CHANGE));
+			}
+			
+
+			private function enterHandler():void
+			{
+				// Select the next set of rows if an arrow is selected
+				if (this.leftButtonSelected) 
+				{
+					getMoreChannels(-1);
+					return;
+				}
+
+				if (this.rightButtonSelected) 
+				{
+					getMoreChannels(1);
+					return;
+				}
+
+				// The rendered must o been clicked
+				try
+				{
+					_selectedChannel = _channelRow[_selectedIndex -1];
+					
+					this.dispatchEvent(new Event(CHANNEL_SELECTED));
+				}
+				catch (err:Error)
+				{
+					_selectedChannel = null;
+					LogUtils.writeErrorToLog(err);
+				}				
+			}
+			
+			private function getMoreChannels(direction:int):void
+			{
+				_lastDirection = direction;
+
+				moveOut.xFrom = lstChannels.x;
+				moveOut.xTo = groupChannels.width * direction;				
+				slideOut.play([lstChannels]);
+				
+				btnRight.enabled = false;
+				btnLeft.enabled = false;
+
+			}
+			
+			protected function moveOut_effectEndHandler(event:EffectEvent):void
+			{
+				var rowCount:int = Math.ceil(_channels.length / COLUMN_COUNT);
+				_row += _lastDirection;
+				if (_row < 0) {_row = rowCount -1}
+				if (_row >= rowCount) {_row = 0;}
+				
+				buildChannelRowArray();
+
+				moveIn.xFrom = groupChannels.width * _lastDirection * -1;
+				moveIn.xTo = 0;
+				slideIn.play([lstChannels]);
+			}
+			
+			protected function moveIn_effectEndHandler(event:EffectEvent):void
+			{
+				btnRight.enabled = true;
+				btnLeft.enabled = true;
+			}
+			
+		]]>
+	</fx:Script>
+	<s:Button id="btnLeft" visible="{_canChange}" icon="@Embed('assets/images/arrow_left.png')" tabEnabled="false" click="getMoreChannels(-1)"/>
+	
+	<s:Group id="groupChannels" clipAndEnableScrolling="true" width="490">
+		<s:List id="lstChannels" borderVisible="false" contentBackgroundAlpha="0"
+				dataProvider="{_channelRow}" hasFocusableChildren="true" 
+				itemRenderer="com.stratoscreen.renderers.ChannelItem">
+			<s:layout>
+				<s:TileLayout horizontalAlign="center" horizontalGap="6" orientation="rows"
+							  requestedRowCount="1" verticalGap="6"/>
+			</s:layout>				
+		</s:List>
+	</s:Group>
+	<s:Button id="btnRight" icon="@Embed('assets/images/arrow_right.png')"  tabEnabled="false"  visible="{_canChange}" click="getMoreChannels(1)" />
+</s:HGroup>
