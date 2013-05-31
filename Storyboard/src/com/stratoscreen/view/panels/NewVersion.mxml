@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009"   xmlns:s="library://ns.adobe.com/flex/spark" 
+				   xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" styleName="PanelWarning">
+	<s:layout>
+		<s:VerticalLayout paddingBottom="10" paddingLeft="10" paddingRight="10" paddingTop="10"/>
+	</s:layout>
+	
+	<fx:Script>
+		<![CDATA[
+
+			private static const URL_AIR:String = "http://apps.stratoscreen.com/install/StoryboardAir.air";
+			private static const URL_EXE:String = "http://apps.stratoscreen.com/install/StoryboardAir.exe";
+
+			protected function lblDownloadAir_clickHandler(event:MouseEvent):void
+			{
+				navigateToURL(new URLRequest(URL_AIR));
+			}
+
+			protected function lblDownloadExe_clickHandler(event:MouseEvent):void
+			{
+				navigateToURL(new URLRequest(URL_EXE));
+			}
+
+		]]>
+	</fx:Script>
+	
+	<s:Label fontWeight="bold" text="A new version of the Storyboard is avaiable for download."/>
+	<s:Spacer />
+	
+	<s:HGroup>
+		<s:Label id="lblDownloadExe" text="Download" color="#0000FF" textDecoration="underline" 
+				 buttonMode="true" useHandCursor="true" click="lblDownloadExe_clickHandler(event)"/>
+		<s:Label text=" Windows native installer." />
+	</s:HGroup>
+
+	<s:HGroup>
+		<s:Label id="lblDownloadAir" text="Download" color="#0000FF" textDecoration="underline" 
+				 buttonMode="true" useHandCursor="true" click="lblDownloadAir_clickHandler(event)"/>
+		<s:Label text=" Adobe AIR installer." />
+	</s:HGroup>
+
+</s:BorderContainer>

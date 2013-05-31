@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" width="22" height="22" contentBackgroundAlpha="0.0">
+	<fx:Script>
+		<![CDATA[
+
+			public static const CLICKED:String= "CLICKED";
+			
+			[Bindable] public var selected:Boolean;
+			[Bindable] [Embed(source="/assets/icons/alphaSort.png")]
+			private var iconSort:Class;
+			[Bindable] [Embed(source="/assets/icons/alphaSortDesc.png")]
+			private var iconSortDesc:Class;			
+
+
+			protected function clickHandler(event:MouseEvent):void
+			{
+				selected = !selected;
+				this.dispatchEvent(new Event(CLICKED));
+			}
+
+		]]>
+	</fx:Script>
+	<s:ToggleButton horizontalCenter="0" verticalCenter="0" width="100%" height="100%" 
+					click="clickHandler(event)" selected="{selected}"/>
+	<mx:Image horizontalCenter="0" verticalCenter="0" id="imgSort" source="{iconSort}" 
+			  scaleContent="false" click="clickHandler(event)" visible="{!selected}"/>
+	<mx:Image horizontalCenter="0" verticalCenter="0" id="imgSortDesc" source="{iconSortDesc}" 
+			  scaleContent="false" click="clickHandler(event)"  visible="{selected}"/>
+</s:Group>

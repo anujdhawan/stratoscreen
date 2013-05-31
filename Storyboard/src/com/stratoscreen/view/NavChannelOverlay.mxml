@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:view="com.stratoscreen.view.*"
+					xmlns:components="com.stratoscreen.components.*" width="100%" height="100%" 
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.controller.ForeignKeyControl;
+			import com.stratoscreen.controller.OverlayEditControl;
+			import com.stratoscreen.events.ForeignKeyEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			import com.stratoscreen.model.domains.Overlays;
+			import com.stratoscreen.renderers.ChannelOverlayItem;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			private static const DETAIL_HEIGHT:int = 135;
+
+			[Bindable] private var _overlays:ArrayCollection;
+			private var _appManager:AppManager;
+			private var _shown:Boolean = false;
+			private var _deleteOverlay:Overlays;
+			private var _overlayControl:OverlayEditControl;
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+			
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (!_shown)
+				{
+					overlayDetail.addEventListener(GroupChannelOverlayDetail.DETAIL_CLOSE, detailCloseHandler);
+					overlayDetail.addEventListener(GroupChannelOverlayDetail.OVERLAY_DELETE, deleteOverlayHandler);
+					overlayDetail.addEventListener(GroupChannelOverlayDetail.OVERLAY_EDIT, editOverlayHandler);
+					hideDetail();
+					loadOverlays();
+					_shown = true;
+				}
+			}
+			
+			public function refresh():void
+			{
+				loadOverlays();
+			}
+			
+			private function loadOverlays():void
+			{
+				var sql:String = "Select * from Overlays where accountId='";
+				sql += _appManager.currentUser.accountId + "' ";
+				sql += "and type='" + Overlays.TYPE_CHANNEL + "'"
+				_appManager.sdb.select(sql, loadOverlaysHandler, Overlays);
+				
+				this.parentDocument.enabled = false;				
+			}
+			
+			private function loadOverlaysHandler(event:SDBEvent):void
+			{
+				this.parentDocument.enabled = true;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not load Overlays. Please try again later", "Load Error");
+					return;
+				}
+				
+				_overlays = new ArrayCollection();
+				_overlays.source = event.result as Array;				
+				
+				// Default to a sort by name
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name", true)];				
+				_overlays.sort = sort;
+				_overlays.refresh();		
+				
+				// Pass a reference to the parent. We will search from there
+				this.parentDocument.childData = _overlays;	
+				
+				hideDetail();
+			}
+			
+			private function hideDetail():void
+			{
+				overlayDetail.height = 0;
+				overlayDetail.visible = false;	
+			}
+			
+			private function detailCloseHandler(event:Event):void
+			{
+				hideDetail();
+			}
+
+			private function editOverlayHandler(event:Event):void
+			{
+				if (_overlayControl == null) 
+				{
+					_overlayControl = new OverlayEditControl(this.parentApplication as DisplayObject);
+					_overlayControl.addEventListener(OverlayEditControl.OVERLAY_UPDATE, overlayUpdateHandler);
+				}
+				
+				if (event == null)
+				{
+					// assume new overlay
+					_overlayControl.editOverlay(null, Overlays.TYPE_CHANNEL);	
+				}
+				else
+				{
+					_overlayControl.editOverlay(event.target.mediaOverlay as Overlays);
+				}
+			}
+			
+			private function overlayUpdateHandler(event:Event):void
+			{
+				loadOverlays();
+			}
+			
+			private function deleteOverlayHandler(event:Event):void
+			{
+				_deleteOverlay = event.target.mediaOverlay;
+				
+				Alert.show("Do you want to " + _deleteOverlay.name + "?", "Delete Overlay", Alert.YES | Alert.NO,
+					null, deleteAnswerHandler, null, Alert.NO); 
+			}
+			
+			private function deleteAnswerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.NO) {return;}
+				
+				// Check for foreign keys first 
+				var control:ForeignKeyControl = new ForeignKeyControl(_appManager);
+				control.checkGroups( _deleteOverlay.itemName, foreignKeyHandler);				
+			}
+			
+			private function foreignKeyHandler(event:ForeignKeyEvent):void
+			{
+				var msg:String;
+				if (!event.success)
+				{
+					msg = "Could not confirm the file can be deleted. Please try again later";
+					Alert.show(msg, "Foreign Key Error");
+					_deleteOverlay = null;
+					return;
+				}
+				
+				if (event.conflictFound)
+				{
+					msg = "Cannot delete " + _deleteOverlay.name + ". It is being used in the ";
+					msg += event.displayName + " table.";
+					Alert.show(msg, "Overlay Conflict");
+					_deleteOverlay = null;
+					return;
+				}
+				
+				// Delete the Overlay Header first
+				this.parentDocument.enabled = false;
+				_deleteOverlay.deleted = true;
+				_appManager.sdb.updateDomain([_deleteOverlay], deleteOverlayTableHandler);
+			}
+			
+			
+			private function deleteOverlayTableHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not delete " + _deleteOverlay.name + ". Please try again", "Error Delete");
+					this.parentDocument.enabled = true;
+					return;
+				}
+				
+				// Get a list of the Detail so we can delete
+				var sql:String = "Select * from OverlayDetail where overlayId='";
+				sql += _deleteOverlay.itemName + "'";
+				_appManager.sdb.select(sql, loadOverlayDetailHandler, OverlayDetail);					
+			}
+			
+			
+			private function loadOverlayDetailHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not list " + _deleteOverlay.name + " items for delete. " +
+						"These items will need to be manually deleted", "Error Delete");
+					this.parentDocument.enabled = true;
+					return;
+				}			
+				
+				var items:Array = event.result as Array;				
+				for (var i:int = 0; i < items.length; i++)
+				{
+					items[i].deleted = true;	
+				}
+				
+				// Run the update so the items can be deleted
+				_appManager.sdb.updateDomain(items, deleteOverlayDetailHandler);
+			}
+			
+			private function deleteOverlayDetailHandler(event:SDBEvent):void
+			{
+				try
+				{
+					if (!event.success)
+					{
+						Alert.show("Could not delete " + _deleteOverlay.name + " items for delete. " +
+							"These items will need to be manually deleted", "Error Delete");
+						return;
+					}
+				}
+				finally
+				{
+					_deleteOverlay = null;
+					loadOverlays();
+				}
+			}
+			
+			protected function btnAdd_clickHandler(event:MouseEvent):void
+			{
+				editOverlayHandler(null);
+				hideDetail();
+			}
+			
+			public function itemClick(item:ChannelOverlayItem):void
+			{
+				overlayDetail.height = DETAIL_HEIGHT;
+				overlayDetail.visible = true;
+				overlayDetail.channelOverlay = item.data as Overlays;
+			}
+
+		]]>
+	</fx:Script>
+	<s:VGroup x="0" y="0" width="100%" height="100%" paddingLeft="10" paddingRight="10" paddingTop="10" paddingBottom="10">
+		<s:BorderContainer height="100%" width="100%">
+			<s:List x="5" y="5" height="100%" width="100%" itemRenderer=" com.stratoscreen.renderers.ChannelOverlayItem" dataProvider="{_overlays}" borderVisible="false">
+				<s:layout>
+					<s:TileLayout orientation="rows"/>
+				</s:layout>			
+			</s:List>
+			<mx:SWFLoader id="swfLoading" horizontalCenter="0" verticalCenter="0" width="25%" height="25%" 
+						  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true" visible="{!this.parentDocument.enabled}"/>			
+		</s:BorderContainer>
+		<view:GroupChannelOverlayDetail id="overlayDetail" width="100%" />
+		<s:HGroup width="100%">
+			<s:Button id="btnAdd" label="Create Overlay ..." click="btnAdd_clickHandler(event)"/>
+			<mx:Spacer width="100%" />
+		</s:HGroup>
+	</s:VGroup>			
+</s:NavigatorContent>

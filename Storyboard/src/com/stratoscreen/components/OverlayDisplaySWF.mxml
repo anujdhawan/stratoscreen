@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*" 
+		 width="400" height="300" contentBackgroundAlpha="0.33"  
+		 preinitialize="preinitializeHandler(event)"  creationComplete="creationCompleteHandler(event)" 
+		 removedFromStage="removedFromStageHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.EffectsManager;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			
+			import mx.effects.Parallel;
+			import mx.events.EffectEvent;
+			import mx.events.FlexEvent;
+			
+			private static const CYCLES_PER_SECOND:int = 3;		// Keep as low as possible 
+			private static var _appManager:AppManager;
+			
+			[Bindable] private var _overlayDetail:OverlayDetail;
+			private var _effectsManager:EffectsManager;
+			private var _startTime:int;
+			private var _endTime:int;
+			private var _startFrame:int;
+			private var _endFrame:int;
+			private var _timer:Timer = null;			
+			private var _paused:Boolean;
+			private var _useFrameCount:Boolean;
+			private var _loadSubmitted:Boolean = false;
+			private var _removing:Boolean = false;
+			[Bindable] private var _alpha:Number = 1;
+			private var _effectOut:Object;
+			
+			public var currentFrame:int;
+			
+			public override function get alpha():Number
+			{
+				return _alpha;	
+			}
+			
+			public override function set alpha(value:Number):void
+			{
+				_alpha = value;
+			}
+			
+			protected function preinitializeHandler(event:FlexEvent):void
+			{				
+				_effectsManager = new EffectsManager();
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				s3Loader.visible = false;
+				s3Loader.filters = _overlayDetail.filters;
+				swfLoading.visible = true;
+				
+				var startVisible:Boolean = false;
+				if (_timer == null) {startVisible = true;}
+				if (_useFrameCount)
+				{
+					startVisible = _startFrame == 0;
+				}
+				else
+				{
+					startVisible = _startTime == 0;
+				}				
+				
+				if (_timer != null) {_timer.start();}
+				this.visible = startVisible;
+				
+				// Add the local
+				if (_appManager == null) {_appManager = this.parentApplication.appManager;}
+					
+				_overlayDetail.localUrl = _appManager.s3.getSelectURL(_appManager.currentAccount.bucket,  _overlayDetail.mediaId);
+				
+				if (startVisible) 
+				{
+					s3Loader.signedURLSource = _overlayDetail.localUrl;
+					_loadSubmitted = true;
+				}
+			}
+
+			protected function s3Loader_Handler(event:Event):void
+			{
+				// Keep the place holder if we did not load.
+				if (!(event is IOErrorEvent))
+				{
+					this.setStyle("contentBackgroundAlpha", "0.0");
+					s3Loader.visible = true;
+				}
+
+				swfLoading.visible = false;
+				
+				// Play the effects
+				var detailAlpha:Number = parseFloat(_overlayDetail.alpha);
+				var detailRotate:Number = parseFloat(_overlayDetail.rotate);
+				switch (overlayDetail.effectId)
+				{
+					case EffectsManager.EFFECT_FADE:
+						var fade:Fade = _effectsManager.fadeIn(effectInEndHandler, 0, detailAlpha);
+						_effectOut = _effectsManager.fadeOut(effectOutEndHandler, detailAlpha, 0);
+						fade.play([s3Loader]);
+						break;
+					
+					case EffectsManager.EFFECT_SPIN:
+						var spin:Parallel = _effectsManager.spinIn(effectInEndHandler, 360, 0, 0, detailAlpha);
+						_effectOut = _effectsManager.spinOut(effectOutEndHandler, 0, 360, detailAlpha, 0);
+						spin.play([s3Loader]);
+						break;
+					
+					case EffectsManager.EFFECT_SLIDE:
+						var detailX:Number = parseFloat(overlayDetail.x);
+						var detailWidth:Number = parseFloat(overlayDetail.width);
+						var slide:Parallel = _effectsManager.slideIn(effectInEndHandler, detailX - detailWidth, detailX, 0, detailAlpha);
+						_effectOut = _effectsManager.slideOut(effectOutEndHandler, detailX, detailX - detailWidth, detailAlpha, 0 );
+						slide.play([s3Loader]);
+						break;
+					
+					default:
+						_effectOut = null;
+						this.callLater(effectInEndHandler);
+				}
+
+			}
+
+			protected function removedFromStageHandler(event:Event):void
+			{
+				if (_timer != null) {_timer.stop();} // Watch for lingering timers
+			}
+
+			public function get paused():Boolean
+			{
+				return _paused;
+			}
+			
+			public function set paused(value:Boolean):void
+			{
+				_paused = value;	
+				if (_timer == null) {return;}
+				_paused ?  _timer.stop() : _timer.start(); 
+			}
+			
+			public function get overlayDetail():OverlayDetail
+			{
+				return _overlayDetail;
+			}
+			
+			public function set overlayDetail(value:OverlayDetail):void
+			{
+				_overlayDetail = value;
+				
+				// Create the timers if needed
+				_startTime = parseInt(_overlayDetail.startTime);
+				_endTime = parseInt(_overlayDetail.endTime);
+				_startFrame = parseInt(_overlayDetail.startFrame);
+				_endFrame = parseInt(_overlayDetail.endFrame);
+				
+				// Watch for instance where the start is added but not the end
+				if (_startTime > 0 && _endTime == 0) {_endTime = int.MAX_VALUE;}
+				if (_startFrame > 0 && _endFrame == 0) {_endFrame = int.MAX_VALUE;}				
+				
+				if (_startTime > 0 || _endTime > 0 || _startFrame > 0 || _endFrame > 0)
+				{
+					var delay:Number = 1000 / CYCLES_PER_SECOND;
+					
+					_timer = new Timer(delay);
+					_timer.addEventListener(TimerEvent.TIMER, timerHandler)
+				}				
+				_useFrameCount =  (_startFrame > 0 && _endFrame > 0); 
+			}
+			
+			private function timerHandler(event:TimerEvent):void
+			{
+				var secondsElapsed:int = _timer.currentCount / CYCLES_PER_SECOND;
+				
+				// Hide or show depandant on the time
+				if (_useFrameCount)
+				{
+					if (this.currentFrame >= _startFrame && !_loadSubmitted) 
+					{
+						s3Loader.signedURLSource = _overlayDetail.localUrl;
+						if (!this.visible) {this.visible = true;}
+						_loadSubmitted = true;
+					}
+					
+					if (this.currentFrame >= _endFrame) {playEffectOut();}
+				}				
+				else
+				{
+					if (secondsElapsed >= _startTime && !_loadSubmitted) 
+					{
+						s3Loader.signedURLSource = _overlayDetail.localUrl;
+						if (!this.visible) {this.visible = true;}
+						_loadSubmitted = true;
+					}
+					
+					if (secondsElapsed >= _endTime) {playEffectOut();}
+				}
+			}	
+
+			private function playEffectOut():void
+			{
+				_removing = true;
+				_timer.stop();
+
+				if (_effectOut == null)
+				{
+					this.visible = false;
+					this.callLater( effectOutEndHandler);
+				}
+				else
+				{
+					// Play the opposite efect
+					_effectOut.play([s3Loader]);
+				}				
+			}
+			
+			protected function effectInEndHandler(event:Event = null):void
+			{
+			}
+			
+			protected function effectOutEndHandler(event:Event = null):void
+			{
+				if (_removing){this.removeAllElements();}
+			}
+		]]>
+	</fx:Script>
+
+	<components:S3SWFLoader id="s3Loader" complete="s3Loader_Handler(event)" ioError="s3Loader_Handler(event)" height="100%" width="100%" />
+	<mx:SWFLoader id="swfLoading" horizontalCenter="0" verticalCenter="0" width="50%" height="50%" smoothBitmapContent="true" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true" maintainAspectRatio="false" scaleContent="true"/>
+</s:Group>

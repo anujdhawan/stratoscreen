@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" autoDrawBackground="true" width="128" height="84" 
+				doubleClickEnabled="true" doubleClick="doubleClickHandler(event)"
+				creationComplete="creationCompleteHandler(event)" xmlns:components="com.stratoscreen.components.*">	
+		<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.ImageCacheManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.Channels;
+			import com.stratoscreen.model.domains.ScheduleDetail;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.view.Storyboard;
+			import com.stratoscreen.view.WinChannelEdit;
+			import com.stratoscreen.view.WinScheduleEdit;
+			import com.stratoscreen.view.WinSelectChannel;
+			
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			[Bindable][Embed(source="/assets/icons/delete.png")]
+			private var iconClear:Class;
+			
+			public static var bucket:String;
+			public static var S3Endpoint:String;
+			private static var _appManager:AppManager;
+			private static var _storyboard:Storyboard;
+			
+			[Bindable] private var _channel:Channels;
+			[Bindable] private var _showDelete:Boolean = false;
+			private var _scheduleDetail:ScheduleDetail;
+			private var _data:Object = null;
+			private var _shown:Boolean
+			private var _imageUtils:ImageUtils;
+			private var _lastEditWindow:DisplayObject;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.data = _channel;		// Draw the renderer
+				_storyboard = this.parentApplication.storyboard;
+				_appManager = this.parentApplication.appManager;
+				_imageUtils = new ImageUtils();
+			}
+
+			public override function get data():Object
+			{
+				return _data;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				if (_data == value) {return;} // the item renderer has not changed
+				if (value == null) {return;}
+				_data = value;
+				
+				// This will be used by the Channel Edit and the TV Line Up Edit
+				if (value is Channels)
+				{
+					_channel = value as Channels;	
+				}
+				else if (value is ScheduleDetail)
+				{
+					_scheduleDetail = value as ScheduleDetail;
+					
+					_channel = new Channels();
+					_channel.itemName = value.itemId;
+					_channel.name = value.name;
+					_channel.firstMediaId = value.firstMediaId;
+					_showDelete = true;
+				}
+				else
+				{
+					return;
+				}
+				
+				var thumbUrl:String = "https://" + S3Endpoint + "/" + bucket;
+				thumbUrl += "/" + Constants.THUMB_PREFIX + _channel.firstMediaId + Constants.THUMB_EXTENSION; 
+				imgThumb.source = ImageCacheManager.getInstance().getImageByURL(thumbUrl);
+				imgThumb.load();
+				swfLoading.visible = true;				
+			}
+			
+			protected function imgThumb_completeHandler(event:Event):void
+			{
+				swfLoading.visible = false;
+				var rect:ResizeRectangle = _imageUtils.getBestFit(event.target.content.width, event.target.content.height, 
+					                                              groupThumb.width, groupThumb.height);
+				imgThumb.x = rect.x;
+				imgThumb.y = rect.y;
+				imgThumb.width = rect.width;
+				imgThumb.height = rect.height;
+			}
+
+			
+			protected function itemClickHandler(event:MouseEvent):void
+			{
+				// The item renderer maybe used in the Channel selection dialog
+				if (_appManager.currentEditWindow is WinSelectChannel)
+				{
+					WinSelectChannel(_appManager.currentEditWindow).itemClick(this);
+				}
+				else if (_appManager.currentEditWindow is WinScheduleEdit)
+				{
+					// We only need the Channel ID for this
+					WinScheduleEdit(_appManager.currentEditWindow).itemClick(_data.itemName);
+				}
+				else
+				{
+					_storyboard.navChannels.navChannelsChannels.itemClick(this);	
+				}
+				event.stopImmediatePropagation();
+			}
+			
+			protected function doubleClickHandler(event:MouseEvent):void
+			{
+				if (_appManager.currentEditWindow is WinScheduleEdit)
+				{
+					var winEdit:WinChannelEdit = new WinChannelEdit();
+					winEdit.addEventListener(CloseEvent.CLOSE, winEditCloseHandler);
+					winEdit.width = this.parentApplication.width * Constants.EDIT_WINDOW_SIZE_SUB;
+					winEdit.height = this.parentApplication.height * Constants.EDIT_WINDOW_SIZE_SUB;				
+					winEdit.channel = _channel;		
+					
+					_lastEditWindow = _appManager.currentEditWindow;
+					_appManager.currentEditWindow = winEdit;
+					
+					PopUpManager.addPopUp(winEdit, this.parentApplication as DisplayObject, true);
+					return;
+				}
+				else
+				{
+					// open the detail
+					_storyboard.navChannels.navChannelsChannels.itemClick(this);
+					
+					if (_appManager.currentUser.type == Constants.USER_TYPE_MANAGER || _channel.createdBy == _appManager.currentUser.itemName)
+					{
+						_storyboard.navChannels.navChannelsChannels.channelDetail.editChannel();
+					}
+				}
+			}				
+			
+			private function winEditCloseHandler(event:CloseEvent):void
+			{
+				_appManager.currentEditWindow = _lastEditWindow;
+			}			
+
+			protected function btnClear_clickHandler(event:MouseEvent):void
+			{
+				if (_appManager.currentEditWindow is WinScheduleEdit)
+				{
+					// We only need the Channel ID for this
+					WinScheduleEdit(_appManager.currentEditWindow).removeItem(_scheduleDetail.itemName);
+				}
+				event.stopImmediatePropagation();
+			}
+
+		]]>
+		</fx:Script>
+	<mx:SWFLoader id="swfLoading" horizontalCenter="2" verticalCenter="-4" width="50%" height="50%" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>
+
+	<mx:Image id="imgFilm" source="@Embed('/assets/images/filmStrip.png')" scaleContent="false"  width="128" height="69"/>
+	<s:Group id="groupThumb" click="itemClickHandler(event)" left="15" top="3" right="15" height="63">
+		<mx:Image id="imgThumb" complete="imgThumb_completeHandler(event)" />
+	</s:Group>	
+	<s:Label text="{_channel.name}" width="100%" left="0" bottom="0" textAlign="center" maxDisplayedLines="1"/>
+	<components:IconButton right="0" top="0" id="btnClear" icon="{iconClear}" visible="{_showDelete}"  click="btnClear_clickHandler(event)"/>
+</s:ItemRenderer>

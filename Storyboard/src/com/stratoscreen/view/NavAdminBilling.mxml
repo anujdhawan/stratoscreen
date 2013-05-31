@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009"
+					xmlns:s="library://ns.adobe.com/flex/spark"
+					xmlns:mx="library://ns.adobe.com/flex/mx"
+					width="100%" height="100%" creationComplete="creationCompleteHandler(event)"
+					currentState="aws" show="showHandler(event)" resize="this_resizeHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.BillingRow;
+			import com.stratoscreen.utils.GUID;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ResizeEvent;
+			import mx.managers.PopUpManager;
+			
+			import spark.events.IndexChangeEvent;
+			
+			[Bindable] private var _billingDetails:ArrayCollection; 
+			private var _parentApplication:DisplayObject;
+			private var _appManager:AppManager;
+			private var _winFPS:WinPayments;
+			private var _subscriptionId:String;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_parentApplication = this.parentApplication as DisplayObject;
+				_appManager = this.parentApplication.appManager;
+				
+				if (linkView != null) {showHandler(null);}
+			}
+						
+			public function get isDirty():Boolean
+			{
+				return false;	// Use by the main navigator
+			}
+			
+			protected function showHandler(event:FlexEvent):void
+			{
+				// Enabled the appropriate buttons
+				if (currentState == "aws")
+				{
+					linkView.enabled = _appManager.currentAccount.billing != "";
+				}
+			}
+			
+			protected function this_resizeHandler(event:ResizeEvent):void
+			{
+				if (_winFPS != null)
+				{
+					_winFPS.width = _parentApplication.width * Constants.EDIT_WINDOW_SIZE;
+					_winFPS.height = _parentApplication.height * Constants.EDIT_WINDOW_SIZE;
+					
+					PopUpManager.centerPopUp(_winFPS);
+				}
+			}
+			
+			protected function link_clickHandler(event:MouseEvent):void
+			{
+				linkView.enabled = _appManager.currentAccount.billing != "";
+				linkUpdate.enabled = true;
+				
+				if (event.target == linkView)
+				{
+					linkView.enabled = false;
+					this.currentState = "view";
+					_billingDetails = new ArrayCollection(_appManager.currentAccount.billingArray);
+				}
+				else if (event.target == linkUpdate)
+				{
+					linkUpdate.enabled = false;
+					this.currentState = "add";
+				}
+			}
+			
+			protected function btnView_clickHandler(event:MouseEvent):void
+			{
+				openFPSWindow(WinPayments.BILLING_VIEW);
+			}
+			
+			protected function btnAdd_clickHandler(event:MouseEvent):void
+			{
+				if (stepLicense.value == 0) {stepLicense.value = 1;}
+				
+				openAddScreens();
+			}
+			
+			private function updateAnswerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.NO) {return;}
+				openAddScreens();
+			}
+			
+			private function openAddScreens():void
+			{
+				openFPSWindow(WinPayments.BILLING_ADD, stepLicense.value, _appManager.currentAccount.accountId );
+			}
+			
+			private function openFPSWindow(action:int, licenseCount:int = 0, billingRef:String = ""):void
+			{
+				_winFPS = new WinPayments();
+				_winFPS.setAction(action, licenseCount, billingRef);
+				_winFPS.addEventListener(CloseEvent.CLOSE, winFPSCloseHandler);
+				_winFPS.width = _parentApplication.width * Constants.EDIT_WINDOW_SIZE;
+				_winFPS.height = _parentApplication.height * Constants.EDIT_WINDOW_SIZE;
+				
+				PopUpManager.addPopUp(_winFPS, _parentApplication, true); 
+			}
+			
+			private function winFPSCloseHandler(event:CloseEvent):void
+			{
+				_winFPS = null;
+				linkView.enabled = _appManager.currentAccount.billing != "";
+			}				
+			
+			protected function lblAWSLink_clickHandler(event:MouseEvent):void
+			{
+				navigateToURL( new URLRequest("https://payments.amazon.com/sdui/sdui/managepa"));
+			}
+			
+			public function cancelSubscription(row:BillingRow):void
+			{
+				_subscriptionId = row.subscriptionId;
+				
+				Alert.show("Do you want to cancel this subscription?\r\nThis will reduce your screen licenses by " + row.screenCount, "Cancel Subscription", 
+					       Alert.YES | Alert.NO, null, cancelAnswerHandler, null, Alert.NO);
+				
+			}
+			
+			private function cancelAnswerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.NO) {return;}
+				
+				openFPSWindow(WinPayments.BILLING_CANCEL, 0, _subscriptionId);
+			}
+			
+		]]>
+	</fx:Script>
+	<s:states>
+		<s:State name="aws"/>
+		<s:State name="view"/>
+		<s:State name="add"/>
+	</s:states>
+
+	<s:BorderContainer width="100%" styleName="Panel">
+		<s:layout>
+			<s:HorizontalLayout gap="10" paddingBottom="10" paddingLeft="10" paddingRight="10" paddingTop="10"/>
+		</s:layout>
+		
+		<s:BorderContainer styleName="Panel"  borderColor="#808080">
+			<s:layout>
+				<s:VerticalLayout paddingBottom="10" paddingTop="10" paddingLeft="5" paddingRight="5"/>
+			</s:layout>
+			<mx:LinkButton id="linkView" label="View Subscriptions" icon="@Embed(source='/assets/icons/basket.png')" click="link_clickHandler(event)" width="100%"/>
+			<mx:LinkButton id="linkUpdate" label="Add Subscription" icon="@Embed(source='/assets/icons/basket_add.png')" click="link_clickHandler(event)" width="100%"/>
+		</s:BorderContainer>
+
+		<s:Spacer height="20" /> 
+		
+		<s:VGroup includeIn="view" paddingLeft="20" >
+			<s:List id="listDetails" borderVisible="false" dataProvider="{_billingDetails}"
+					itemRenderer="com.stratoscreen.renderers.BillingItem" >
+				<s:layout>
+					<s:VerticalLayout gap="0"/>
+				</s:layout>
+			</s:List>
+			
+			<s:Spacer height="10" />
+			<s:Label id="lblAWSLink" click="lblAWSLink_clickHandler(event)" color="#0000C0" useHandCursor="true" buttonMode="true"
+					 fontWeight="bold" text="View Amazon Payments site" textDecoration="underline"/>
+		</s:VGroup>
+
+		<s:VGroup includeIn="add" paddingLeft="20"  >
+			<s:Label id="lblUpdate" fontWeight="bold" text="Add screen subsctptions"/>
+			<s:Spacer />
+			<s:HGroup paddingLeft="20">
+				<s:NumericStepper id="stepLicense"  maximum="999" minimum="1"/>
+				<s:Button id="btnAdd" label="Add" click="btnAdd_clickHandler(event)" />
+			</s:HGroup>
+		</s:VGroup>
+
+		<s:VGroup excludeFrom="add, view"  paddingLeft="20" >
+			<s:Image source="@Embed('assets/images/amazonPayments.png')"/>
+			<s:Label>
+				<s:text>StratoScreen uses Amazon Payments for screen subscriptions</s:text>
+			</s:Label>
+						
+		</s:VGroup>
+
+	</s:BorderContainer>
+	
+</s:NavigatorContent>

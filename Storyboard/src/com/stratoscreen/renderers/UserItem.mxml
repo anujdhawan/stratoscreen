@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" autoDrawBackground="true" width="96" height="84" 
+				creationComplete="creationCompleteHandler(event)" doubleClick="doubleClickHandler(event)" click="clickHandler(event)" doubleClickEnabled="true">	
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.model.domains.Users;
+			import com.stratoscreen.view.Storyboard;
+			
+			import mx.events.FlexEvent;
+			
+			private var _data:Object = null;
+			private var _user:Users;
+			private var _storyboard:Storyboard;
+
+			[Bindable][Embed(source="/assets/images/user.png")]
+			private static var imageUser:Class;			
+
+			[Bindable][Embed(source="/assets/images/admin.png")]
+			private static var imageAdmin:Class;			
+
+			public override function get data():Object
+			{
+				return _data;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				if (_data == value) {return;} // the item renderer has not changed
+				if (value == null) {return;}
+				if (imgType == null) {return;}	// Still renderering
+				_data = value;
+
+				_user = value as Users;
+				imgType.source = _user.type == Constants.USER_TYPE_MANAGER ? imageAdmin : imageUser;
+				imgType.alpha = _user.status == Users.STATUS_DISABLED ? 0.33 : 1;
+				lblUser.text = _user.lastName + ", " + _user.firstName;
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_storyboard = this.parentApplication.storyboard;
+
+				// Redraw if needed
+				this.data = _data;
+			}
+
+
+			protected function doubleClickHandler(event:MouseEvent):void
+			{
+				// TODO Auto-generated method stub
+			}
+
+
+			protected function clickHandler(event:MouseEvent):void
+			{
+				_storyboard.navAdmin.navUsers.itemSelect(_user);
+			}
+
+		]]>
+	</fx:Script>
+	<mx:Image id="imgType" width="64" height="64" horizontalCenter="0" top="5"/>
+	<s:Label y="71" left="0" right="0" textAlign="center" id="lblUser" maxDisplayedLines="1" text=" "/>
+</s:ItemRenderer>

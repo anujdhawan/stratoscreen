@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:MXDataGridItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+						  xmlns:mx="library://ns.adobe.com/flex/mx" focusEnabled="true"  
+						  creationComplete="creationCompleteHandler(event)" maxHeight="18" maxWidth="30">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.ImageCacheManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.*;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.view.WinMediaGroupEdit;
+			
+			import mx.events.FlexEvent;
+
+			public static const THUMB_RESIZED:String = "THUMB_RESIZED";
+			public static var bucket:String;
+			public static var S3Endpoint:String;
+			private static var _appManager:AppManager;
+			
+			private var _data:Object;
+			private var _imageUtils:ImageUtils;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;	
+			}
+
+			public function get thumbBmpdata():BitmapData
+			{
+				if (imgThumb.content == null) {return null;}
+				if (!(imgThumb.content is Bitmap)) {return null;}
+				
+				return Bitmap(imgThumb.content).bitmapData;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				try
+				{
+					if (value == _data) {return;} // The item renderer is not being reused
+					_data = value;
+					
+					var thumbUrl:String = "https://" + S3Endpoint + "/" + bucket;
+					thumbUrl += "/" + Constants.THUMB_PREFIX;
+						
+					// Use the Media ID when assembling the thumbnail
+					if (value is Medias)
+					{
+						thumbUrl += value.itemName;	
+					}
+					else if (value is MediaGroupDetail)
+					{
+						thumbUrl += value.mediaId;
+					}
+					else if (value is MediaGroups)
+					{
+						thumbUrl += value.firstMediaId;
+					}
+					else if (value is Overlays)
+					{
+						thumbUrl += value.baseMediaId;
+					}
+					else if (value is Channels)
+					{
+						thumbUrl += value.firstMediaId;
+					}
+					else 
+					{
+						throw new Error("Unexpected type");
+					}
+					
+					thumbUrl += Constants.THUMB_EXTENSION; 
+					imgThumb.source = ImageCacheManager.getInstance().getImageByURL(thumbUrl);
+					imgThumb.load();
+				} 
+				catch(err:Error)
+				{
+					trace("");
+				}
+			}
+				
+			protected function imgThumb_completeHandler(event:Event):void
+			{
+				if (_imageUtils == null) {_imageUtils = new ImageUtils();}
+
+				var rect:ResizeRectangle = _imageUtils.getBestFit(event.target.content.width, event.target.content.height, 
+					                                             this.maxWidth, this.maxHeight);
+				imgThumb.x = rect.x;
+				imgThumb.y = rect.y;
+				imgThumb.width = rect.width;
+				imgThumb.height = rect.height;
+				
+				this.dispatchEvent(new Event(THUMB_RESIZED));
+			}
+
+
+			protected function imgThumb_rollOutHandler(event:MouseEvent):void
+			{
+				Object(_appManager.currentEditWindow).hideImage();
+			}
+
+
+			protected function imgThumb_rollOverHandler(event:MouseEvent):void
+			{
+				Object(_appManager.currentEditWindow).showImage(this);
+			}
+
+
+			protected function imgThumb_ioErrorHandler(event:IOErrorEvent):void
+			{
+				trace("");
+			}
+
+		]]>
+	</fx:Script>
+	
+	<mx:Image id="imgThumb" scaleContent="true" maintainAspectRatio="true" horizontalCenter="0" verticalCenter="0" smoothBitmapContent="true" 
+			  complete="imgThumb_completeHandler(event)"  rollOut="imgThumb_rollOutHandler(event)" rollOver="imgThumb_rollOverHandler(event)" ioError="imgThumb_ioErrorHandler(event)"/>
+</s:MXDataGridItemRenderer>

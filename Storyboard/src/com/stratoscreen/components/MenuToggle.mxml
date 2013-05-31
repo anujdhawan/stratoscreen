@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:HGroup xmlns:fx="http://ns.adobe.com/mxml/2009"
+		  xmlns:s="library://ns.adobe.com/flex/spark"
+		  xmlns:mx="library://ns.adobe.com/flex/mx"
+		  width="125" paddingLeft="2" paddingRight="0" verticalAlign="middle"
+		  gap="2">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			
+			[Bindable] public var text:String;
+			[Bindable] public var textSelected:String;
+			[Bindable] public var showMore:Boolean = false;
+			[Bindable] public var icon:Object;
+			[Bindable] public var iconSelected:Object;
+			
+			private var _selected:Boolean = false;
+			
+			public function get selected():Boolean
+			{
+				return _selected;
+			}
+
+			public function set selected(value:Boolean):void
+			{
+				_selected = value;
+				
+				this.currentState = _selected ? "selected" : "unselected";				
+			}
+
+		]]>
+	</fx:Script>
+	<s:states>
+		<s:State name="selected"/>
+		<s:State name="unselected"/>
+	</s:states>
+	
+	<s:Image source.unselected="{icon}" source.selected="{iconSelected}" height="16" width="16" alpha="{enabled ? 1 : .66}" />
+	<s:Label width="100%" text.unselected="{text}" text.selected="{textSelected}" maxDisplayedLines="1" alpha="{enabled ? 1 : .66}" />
+	<s:Image visible="{showMore}" source="@Embed('assets/icons/arrow_more.png')" height="12" width="8" alpha="{enabled ? 1 : .66}"/> 
+</s:HGroup>

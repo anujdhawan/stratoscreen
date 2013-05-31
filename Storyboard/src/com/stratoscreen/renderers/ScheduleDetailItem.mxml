@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" autoDrawBackground="true"  
+				creationComplete="creationCompleteHandler(event)" width="150">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.managers.ImageCacheManager;
+			import com.stratoscreen.model.PlayTimes;
+			import com.stratoscreen.model.domains.ScheduleDetail;
+			import com.stratoscreen.model.views.ChannelHdr;
+			import com.stratoscreen.view.NavScreensScreens;
+			import com.stratoscreen.view.Storyboard;
+			
+			import mx.events.FlexEvent;
+			import mx.formatters.DateFormatter;
+
+			public static var bucket:String;
+			public static var S3Endpoint:String;
+
+			[Bindable] private var _detail:ScheduleDetail;
+			[Bindable] private var _playDates:String;
+			[Bindable] private var _playWeekdays:String;
+			[Bindable] private var _playTimes:String;
+			private var _navParent:NavScreensScreens;
+			private var _formatter:DateFormatter;
+			 
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+			}
+			
+			public override function get data():Object
+			{
+				return _detail;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				if (value == null) {return;}
+				if (groupMain == null) {return;} 	// Still rendering
+				if (!(value is ScheduleDetail)) {return;}	// Unexpected item
+
+				_detail = value as ScheduleDetail;				
+
+				var thumbUrl:String = "https://" + S3Endpoint + "/" + bucket;
+				thumbUrl += "/" + Constants.THUMB_PREFIX + _detail.firstMediaId + Constants.THUMB_EXTENSION; 
+				imgThumb.source = ImageCacheManager.getInstance().getImageByURL(thumbUrl);
+				imgThumb.load();
+				imgThumb.visible = true;
+				
+				lblChannelName.text = _detail.name;
+				_playDates = "";
+				_playWeekdays = "";
+				_playTimes = "";
+				
+				if (_detail.startDateString == "" && _detail.endDateString == "")					
+				{
+					_playDates = "No date restrictions";	
+				}
+				else
+				{
+					_playDates = "Dates: ";
+
+					if (_formatter == null)
+					{
+						_formatter = new DateFormatter();
+						_formatter.formatString = "MM/DD/YY";
+					}
+
+					if (_detail.startDateString == "")
+					{
+						_playDates += "now"
+					}
+					else
+					{
+						_playDates += _formatter.format(_detail.startDate);
+					}
+					_playDates += " - ";					
+					if (_detail.endDateString == "")
+					{
+						_playDates += "infinity";
+					}
+					else
+					{
+						_playDates += _formatter.format(_detail.endDate);
+					}
+				}
+				
+				if (_detail.daysOfWeek == "1111111")
+				{
+					_playWeekdays = "No weekday restrictions";	
+				}
+				else
+				{
+					_playWeekdays = "Days of week: ";
+					
+					for (var i:int = 0; i < 7; i++)
+					{
+						if (_detail.daysOfWeek.substr(i, 1) == "1")
+						{
+							switch(i)
+							{
+								case 0:
+									_playWeekdays += "S";
+									break;
+
+								case 1:
+									_playWeekdays += "M";
+									break;
+
+								case 2:
+									_playWeekdays += "T";
+									break;
+
+								case 3:
+									_playWeekdays += "W";
+									break;
+
+								case 4:
+									_playWeekdays += "T";
+									break;
+
+								case 5:
+									_playWeekdays += "F";
+									break;
+
+								case 6:
+									_playWeekdays += "S";
+									break;
+
+							}
+						}
+						else
+						{
+							_playWeekdays += " - ";
+						}
+						
+					}
+				}
+				
+				if (_detail.playTimesArray.length == 0)
+				{
+					_playTimes = "No time restrictions";
+				}
+				else if (_detail.playTimesArray.length == 1)
+				{
+					var times:PlayTimes = _detail.playTimesArray[0];
+					_playTimes = "Times: " ;
+					_playTimes += times.startTime + " - " + times.endTime;					
+				}
+				else
+				{
+					_playTimes = "Complex play times";
+				}	
+			}
+		]]>
+	</fx:Script>
+
+	<s:BorderContainer styleName="DetailBand" width="100%"  height="{groupMain.height}">
+		<s:VGroup id="groupMain" gap="2" paddingBottom="5" paddingLeft="5" paddingRight="5" paddingTop="2" width="100%">
+			<mx:Spacer height="1" />
+			<s:HGroup width="100%" verticalAlign="middle">
+				<mx:Image id="imgThumb" maxHeight="24" width="32" maintainAspectRatio="true" maintainProjectionCenter="true"   />
+				<s:Label id="lblChannelName" fontWeight="bold" />
+			</s:HGroup>
+			
+			<s:Label id="lblDates" text="{_playDates}"  />
+			<s:Label id="lblWeekdays" text="{_playWeekdays}" />
+			<s:Label id="lblTimes" text="{_playTimes}" />
+			
+		</s:VGroup>	
+	</s:BorderContainer>
+
+</s:ItemRenderer>

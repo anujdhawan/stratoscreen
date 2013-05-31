@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="514" height="350" title="Edit Account"
+			   creationComplete="creationCompleteHandler(event)"  close="closeHandler(event)">	
+	<fx:Declarations>
+		<mx:StringValidator id="validAccount" source="{txtName}" property="text" />
+		<mx:StringValidator id="validCompany" source="{txtCompanyName}" property="text" />
+		<mx:EmailValidator id="validEmail" source="{txtContactEmail}" property="text" />
+		<mx:StringValidator id="validContact" source="{txtContactEmail}" property="text" />
+		<mx:StringValidator id="validState" source="{txtState}" property="text" />
+		<mx:StringValidator id="validZip" source="{txtZip}" property="text" />
+	</fx:Declarations>	
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Accounts;
+			import com.stratoscreen.utils.LogUtils;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+
+			private var _appManager:AppManager;
+			[Bindable] private var _account:Accounts;
+			[Bindable] private var _isDirty:Boolean = false;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				
+				lblStatus.text = "Retrieving account information";
+				
+				// Load the Account info
+				_appManager = this.parentApplication.appManager;
+				
+				var sql:String = "Select * from Accounts where itemName()='";
+				sql += _appManager.currentUser.accountId + "'"
+ 				_appManager.sdb.select(sql, queryAccountHandler, Accounts);
+			}
+
+			private function queryAccountHandler(event:SDBEvent):void
+			{
+				try
+				{
+					if (event.result.length == 0) {throw new Error("No matches found");}
+
+					// Assume one row
+					_account = event.result[0];
+					lblStatus.text = " ";
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					Alert.show("Unexpected error retrieving account. Please try again.");
+				}
+			}
+
+			protected function closeHandler(event:CloseEvent):void
+			{
+				// Send the event manually if needed
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+
+
+
+			protected function btnUpdate_clickHandler(event:MouseEvent):void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				if (!validFields()) {return;}
+				
+				_account.updated = true;
+				_account.modifiedBy = _appManager.currentUser.itemName;
+				_account.modifiedDate = new Date();
+				_appManager.sdb.updateDomain([_account], updateAccountHandler);
+			}
+			
+			private function updateAccountHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not update account. Please try again later", "Update Error");
+					return;
+				}
+				
+				closeHandler(null);
+			}
+			
+			private function validFields():Boolean
+			{
+				var result:ValidationResultEvent = validAccount.validate();
+				if (result.results != null)  {return false;}
+				
+				result = validCompany.validate();
+				if (result.results != null)  {return false;}
+				
+				result = validEmail.validate();
+				if (result.results != null)  {return false;}
+				
+				result = validContact.validate();
+				if (result.results != null)  {return false;}
+				
+				result = validState.validate();
+				if (result.results != null)  {return false;}
+				
+				result = validZip.validate();
+				if (result.results != null)  {return false;}
+				
+				return true;
+			}
+			
+		]]>
+	</fx:Script>
+	<s:controlBarContent>
+		<s:Label text=" " id="lblStatus"/>	
+	</s:controlBarContent>
+	<s:Label x="10" y="14" text="Account Name" fontWeight="bold" />
+	<s:TextInput maxChars="25" id="txtName" y="10" text="@{_account.name}" width="370" 
+				  x="115" change="{_isDirty= true}"/>
+	<s:Label x="10" y="39" text="Company Name" fontWeight="bold"/>
+	<s:TextInput maxChars="50" id="txtCompanyName" y="39" text="@{_account.companyName}" 
+				 width="370"  x="115" change="{_isDirty= true}"/>
+	<s:Label x="10" y="67" text="Address" fontWeight="bold"/>
+	<s:TextInput maxChars="100" id="txtAddress1" y="67" text="@{_account.address1}" 
+				 width="370"  x="115" change="{_isDirty= true}"/>
+	<s:TextInput maxChars="100" id="txtAddress2" y="95" text="@{_account.address2}" 
+				 width="370"  x="115" change="{_isDirty= true}"/>
+	<s:TextInput maxChars="50" id="txtCity" y="123" text="@{_account.city}" width="251" x="115" change="{_isDirty= true}"/>
+	<s:TextInput maxChars="2" id="txtState" y="123" text="@{_account.state}" restrict="A-Za-z" 
+				 width="36"  x="374"  typographicCase="uppercase" change="{_isDirty= true}"/>
+	<s:TextInput maxChars="10" id="txtZip" y="123" text="@{_account.zip}" restrict="0-9\-" width="67" x="418" change="{_isDirty= true}"/>
+	<s:TextInput maxChars="50" id="txtPhone" y="151" text="@{_account.phone}" width="295"  x="115" change="{_isDirty= true}"/>
+	<s:Label x="10" y="153" text="Phone" fontWeight="bold"/>
+	<s:Label x="10" y="183" text="Contact Name" fontWeight="bold"/>
+	<s:TextInput maxChars="50" id="txtContactName" y="179" text="@{_account.contactName}" 
+				 width="295"  x="115" change="{_isDirty= true}"/>
+	<s:Label x="10" y="211" text="Contact Email" fontWeight="bold"/>
+	<s:TextInput maxChars="50" id="txtContactEmail" y="207" text="@{_account.email}" width="295" 
+				  x="115" change="{_isDirty= true}"/>
+	<s:Button label="Save" id="btnUpdate" bottom="12" click="btnUpdate_clickHandler(event)" right="23" enabled="{_isDirty}"/>
+</s:TitleWindow>

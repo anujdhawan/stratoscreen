@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx"  width="100%" height="100%" 
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)" xmlns:components="com.stratoscreen.components.*">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.AppManager;
+
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			[Bindable] private var _message:String; 
+			private var _appManager:AppManager;
+						
+			public function get isDirty():Boolean
+			{
+				return false;	// Use by the main navigator
+			}
+			
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				
+				//The nav may need a kick start
+				if (btnInstall != null) {showHandler(null);}
+			}
+			
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (_appManager.currentAccount.sampleContent == "1")
+				{
+					_message = "Sample content is installed.";
+					btnInstall.label = "Reinstall";
+					btnLock.visible = true;
+					btnLock.selected = false;
+				}
+				else
+				{
+					_message = "Sample content is not installed.";
+					btnInstall.label = "Install";
+					btnLock.visible = false;
+					btnLock.selected = true;
+				}
+			}
+			
+
+			protected function btnInstall_clickHandler(event:MouseEvent):void
+			{
+				if (_appManager.currentAccount.sampleContent == "1")
+				{
+					Alert.show("Warning. Reinstalling the sample content can create duplicates.\r\n Do you want to continue?", "Install Sample Content", 
+						Alert.YES | Alert.NO, null, answerHandler, null, Alert.NO);
+				}
+				else
+				{
+					installContent();
+				}
+			}
+
+			private function answerHandler(event:CloseEvent):void
+			{				
+				if (event.detail == Alert.NO) {return;}
+
+				installContent();
+			}
+			
+			private function installContent():void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				var winInstall:WinSampleContentInstall = new WinSampleContentInstall();
+				winInstall.addEventListener(CloseEvent.CLOSE, winInstallCloseHandler);
+				PopUpManager.addPopUp(winInstall, this.parentApplication as DisplayObject, true);
+			}
+			
+			private function winInstallCloseHandler(event:CloseEvent):void
+			{
+				if (WinSampleContentInstall(event.target).success)
+				{
+					Alert.show("The sample content has been installed. You may have to refresh the views to see the newly added media", "Sample Content");
+				}
+				else
+				{
+					Alert.show("The sample content did not install correctly. There may be files/data that has to be manually deleted. Leaving the file/data will not effect your service", "Sample Content");
+				}
+				
+				showHandler(null);
+			}
+		]]>
+	</fx:Script>
+	<s:VGroup height="100%" width="100%">
+		<s:BorderContainer width="100%" height="88" styleName="Panel" >
+			<s:Label width="100%" text="{_message}"  left="10" top="10"/>		
+			<s:Button x="10" y="47" label="Install" id="btnInstall" click="btnInstall_clickHandler(event)" enabled="{btnLock.selected}"/>
+			<components:LockButton x="89" y="47" id="btnLock"  />
+		</s:BorderContainer>
+	</s:VGroup>
+</s:NavigatorContent>

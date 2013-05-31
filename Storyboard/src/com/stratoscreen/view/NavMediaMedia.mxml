@@ -1,0 +1,625 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:view="com.stratoscreen.view.*"
+					xmlns:components="com.stratoscreen.components.*" width="100%" height="100%" 
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.adobe.net.MimeTypeMap;
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.controller.ForeignKeyControl;
+			import com.stratoscreen.controller.MP3Image;
+			import com.stratoscreen.controller.MediaControl;
+			import com.stratoscreen.controller.MediaInfo;
+			import com.stratoscreen.events.ForeignKeyEvent;
+			import com.stratoscreen.events.UpdateMediaEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.*;			
+			import com.stratoscreen.model.views.*;
+			import com.stratoscreen.renderers.MediaItem;
+			import com.stratoscreen.utils.LogUtils;
+			
+			import flash.desktop.ClipboardFormats;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.Alert;
+			import mx.controls.SWFLoader;
+			import mx.core.IVisualElement;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.DragManager;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+			
+			private static const DETAIL_HEIGHT:int = 135;
+			
+			[Bindable] private var _medias:ArrayCollection;
+			private var _appManager:AppManager;
+			private var _shown:Boolean = false;
+			private var _fileFilters:Array;
+			private var _allExtensions:Array;
+			private var _saveIndex:int;
+			private var _deleteMedia:Medias;
+			private var _winMediaUpdate:WinMediaUpdate;
+			private var _updateCount:int;
+			private var _updateTotal:int;
+			private var _mediaControl:MediaControl = null;
+			private var _addedMedia:Medias;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				_medias = new ArrayCollection();
+				
+				_mediaControl = new MediaControl(_appManager);
+				_mediaControl.addEventListener(ProgressEvent.PROGRESS, progressHandler);
+
+				// Pass a reference to the parent. We will search from there
+				this.parentDocument.childData = _medias;
+				
+				// Default to a sort by name
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name", true)];				
+				_medias.sort = sort;
+				_medias.refresh();			
+				
+				
+				// Used when browsing for a single file
+				_fileFilters = new Array((new FileFilter("All", Constants.FILTER_IMAGE + ";" + Constants.FILTER_SWF + ";" + Constants.FILTER_VIDEO + ";" + Constants.FILTER_AUDIO)),
+					                     (new FileFilter("Images", Constants.FILTER_IMAGE)),
+ 			                             (new FileFilter("SWF", Constants.FILTER_SWF)),
+				                         (new FileFilter("Video", Constants.FILTER_VIDEO)),
+					                     (new FileFilter("Audio", Constants.FILTER_AUDIO)));
+				
+				// Used when draging and dropping
+				_allExtensions = new Array();
+				var sections:Array = _fileFilters[0].extension.split(";");	// This first item should have all extensions
+				for (var i:int = 0; i < sections.length; i++)
+				{
+					var extension:String  = sections[i].toLowerCase();
+					extension = StringUtil.trim(extension);
+					extension = extension.replace(new RegExp(/\*/gi), "");;
+					_allExtensions.push(extension);		
+				}
+
+				if (!_shown) {showHandler(null);}
+			}				
+			
+			public function get fileFilters():Array
+			{
+				return _fileFilters;
+			}
+			
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (!_shown)
+				{
+					btnSave.visible = false;
+					btnCancel.visible = false;
+					hideDetail();
+					
+					groupDetail.addEventListener(GroupMediaDetail.DETAIL_CLOSE, detailCloseHandler);
+					groupDetail.addEventListener(GroupMediaDetail.MEDIA_DELETE, deleteMediaHandler);
+					groupDetail.addEventListener(GroupMediaDetail.MEDIA_EDIT, editedMediaHandler);
+					groupDetail.addEventListener(GroupMediaDetail.MEDIA_DATA_EDIT, editedMediaDataHandler);
+					this.addEventListener(NativeDragEvent.NATIVE_DRAG_ENTER, dragEnterHandler);
+					this.addEventListener(NativeDragEvent.NATIVE_DRAG_DROP, dragDropHandler);
+					
+					// Check to see if we have loaded the media yest
+					if (_appManager.medias == null)
+					{
+						this.parentDocument.enabled = false;
+						
+						var sql:String = "Select * from Medias where accountId='";
+						sql += _appManager.currentUser.accountId + "'";						
+						_appManager.sdb.select(sql, mediaLoadHandler, Medias);
+					}
+					else
+					{
+						_medias.source = _appManager.medias;
+					}				
+
+					_shown = true;
+				}
+				
+				if (_medias != null)
+				{
+					// Pass a reference to the parent. We will search from there
+					this.parentDocument.childData = _medias;
+				}
+			}
+			
+			public function refresh():void
+			{
+				this.parentDocument.enabled = false;
+				
+				var sql:String = "Select * from Medias where accountId='";
+				sql += _appManager.currentUser.accountId + "'";						
+				_appManager.sdb.select(sql, mediaLoadHandler, Medias);				
+			}
+
+			private function mediaLoadHandler(event:SDBEvent):void
+			{
+				this.parentDocument.enabled = true;
+				
+				try
+				{
+					// Remove the loading box if it is still open
+					if (_winMediaUpdate != null)
+					{
+						PopUpManager.removePopUp(_winMediaUpdate);
+						_winMediaUpdate = null;
+					}
+					
+					_appManager.medias = event.result as Array;
+					_medias.source = _appManager.medias;
+					
+					this.parentDocument.childData = _medias;
+					
+					// There is a bug with refreshing. Try and refresh in a sec
+					this.callLater(refreshFilter);
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+				}
+			}
+			
+			private function refreshFilter():void
+			{
+				this.parentDocument.childData.refresh();
+			}
+						
+			public function itemClick(item:MediaItem):void
+			{
+				if (item.removing) {return;} // Ignore. This is a repeat event	
+				
+				groupDetail.height = DETAIL_HEIGHT;
+				groupDetail.visible = true;
+				groupDetail.media = item.data as Medias;
+			}
+			
+			private function detailCloseHandler(event:Event):void
+			{
+				hideDetail();
+			}
+			
+			private function hideDetail():void
+			{
+				groupDetail.height = 0;
+				groupDetail.visible = false;	
+				
+				// while here check for pending changes. 
+				for (var i:int = 0; i < _medias.length; i++)
+				{
+					if (!_medias[i].uploaded)
+					{
+						btnSave.visible = true;
+						btnCancel.visible = true;
+						return;
+					}
+				}
+			}		
+			
+			private function editedMediaHandler(event:Event):void
+			{
+				// Find the updated media update it 
+				for (var i:int = 0; i < _medias.length; i++)
+				{
+					if (_medias[i].itemName == groupDetail.media.itemName)
+					{
+						_medias.removeItemAt(i);
+						_medias.addItemAt(groupDetail.media, i);
+						break;
+					}
+				}
+				
+				btnSave.visible = true;
+				btnCancel.visible = true;
+				hideDetail();
+			}
+
+			private function editedMediaDataHandler(event:Event):void
+			{
+				// Find the updated media update it 
+				for (var i:int = 0; i < _medias.length; i++)
+				{
+					if (_medias[i].itemName == groupDetail.media.itemName)
+					{
+						_medias[i].name = groupDetail.media.name;
+						_medias[i].height = groupDetail.media.height;
+						_medias[i].width = groupDetail.media.width;
+						_medias[i].duration = groupDetail.media.duration;
+						_medias[i].frames = groupDetail.media.frames;
+						_medias[i].canStream = groupDetail.media.canStream;
+						_medias[i].modifiedDate = new Date();
+						_medias[i].modifiedBy = _appManager.currentUser.itemName;
+						_medias.refresh();
+						break;
+					}
+				}
+				hideDetail();
+			}
+
+			
+			
+			private function deleteMediaHandler(event:Event):void
+			{
+				_deleteMedia = event.target.media;					
+				Alert.show("Do you want to " + _deleteMedia.name + "?", "Delete Media", Alert.YES | Alert.NO,
+					       null, deleteAnswerHandler, null, Alert.NO); 
+			}
+			
+			private function deleteAnswerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.NO) 
+				{
+					_deleteMedia = null
+					return;					
+				}
+				
+				_winMediaUpdate = new WinMediaUpdate();
+				_winMediaUpdate.message = "Checking for conflicts";
+				PopUpManager.addPopUp(_winMediaUpdate, this.parentApplication as DisplayObject, true);
+				
+				var control:ForeignKeyControl = new ForeignKeyControl(_appManager);
+				control.checkMedia(_deleteMedia.itemName, foreignKeyHandler);
+			}
+			
+			private function foreignKeyHandler(event:ForeignKeyEvent):void
+			{
+				var msg:String;
+				if (!event.success)
+				{
+					msg = "Could not confirm the file can be deleted. Please try again later";
+					Alert.show(msg, "Foreign Key Error");
+					PopUpManager.removePopUp(_winMediaUpdate);
+					_winMediaUpdate = null;
+					return;
+				}
+
+				if (event.conflictFound)
+				{
+					msg = "Cannot delete " + _deleteMedia.name + ". It is being used in the ";
+					msg += event.displayName + " table.";
+					Alert.show(msg, "Media Conflict");
+					PopUpManager.removePopUp(_winMediaUpdate);
+					_winMediaUpdate = null;
+					return;
+				}
+
+				_winMediaUpdate.message = "Deleting " + _deleteMedia.name;
+				_mediaControl.delete_(_deleteMedia, deleteMediaResultHandler);				
+			}
+			
+			private function deleteMediaResultHandler(event:UpdateMediaEvent):void
+			{
+				try
+				{
+					PopUpManager.removePopUp(_winMediaUpdate);
+					_winMediaUpdate = null;
+					
+					if (!event.success)
+					{
+						Alert.show("Could not delete media. Please try again", "Error");
+						return;
+					}
+					
+					// Update the collection
+					for (var i:int = 0; i < _medias.length; i++)
+					{
+						if (_medias[i].itemName == _deleteMedia.itemName)
+						{
+							_medias.removeItemAt(i);	
+							return;
+						}
+					}
+				}
+				finally
+				{
+					this.parentDocument.enabled = true;						
+					_deleteMedia = null;
+					hideDetail();
+				}				
+			}
+			
+			public function removeItem(item:MediaItem):void
+			{
+				try
+				{
+					for (var i:int = 0; i < _medias.length; i++)
+					{
+						if (item.data != null)
+						{
+							if (_medias[i].itemName == item.data.itemName)
+							{
+								_medias.removeItemAt(i);
+								return;
+							}
+						}
+					}
+				}
+				finally
+				{
+					hideDetail();
+				}
+			}
+
+			
+			private function dragEnterHandler(event:NativeDragEvent):void
+			{
+				var found:Boolean = false;
+				if (event.clipboard.hasFormat(ClipboardFormats.FILE_LIST_FORMAT))
+				{
+					var files:Array = event.clipboard.getData(ClipboardFormats.FILE_LIST_FORMAT) as Array;
+					if(files.length >= 1)
+					{
+						for (var i:int = 0; i < files.length; i++)
+						{
+							for (var j:int = 0; j < _allExtensions.length; j++)
+							{
+								if (files[i].type.toLowerCase() == _allExtensions[j])
+								{
+									DragManager.acceptDragDrop(this);
+									return;
+								}
+							}
+						}
+					}					
+				}
+			}
+			
+			private function dragDropHandler(event:NativeDragEvent):void
+			{
+				// Loop through the files and only add the ones that are OK
+				var files:Array = event.clipboard.getData(ClipboardFormats.FILE_LIST_FORMAT) as Array;
+				if(files.length >= 1)
+				{
+					for (var i:int = 0; i < files.length; i++)
+					{
+						for (var j:int = 0; j < _allExtensions.length; j++)
+						{
+							if (files[i].type.toLowerCase() == _allExtensions[j])
+							{
+								addFileToList(files[i]);
+							}
+						}
+					}
+				}					
+			}			
+
+			protected function btnAdd_clickHandler(event:MouseEvent):void
+			{
+				var file:File = new File();
+				file.addEventListener(Event.SELECT, fileSelectHandler);				
+				file.browse(_fileFilters);
+			}
+			
+			private function fileSelectHandler(event:Event):void
+			{
+				event.target.removeEventListener(Event.SELECT, fileSelectHandler);
+				addFileToList(event.target as File);
+			}
+			
+			private function addFileToList(file:File):void
+			{
+				var mimeType:MimeTypeMap = new MimeTypeMap();
+				
+				var media:Medias = new Medias();
+				media.file = file;
+				media.name = file.name;
+				media.size = file.size.toString();
+				media.accountId = _appManager.currentUser.accountId;
+				media.createdBy = _appManager.currentUser.itemName;
+				media.modifiedBy = _appManager.currentUser.itemName;
+				media.modifiedDate = new Date();
+				media.uploaded = false;
+								
+				var ext:String = file.type;
+				ext = ext.toLowerCase();
+				ext = ext.replace(new RegExp(/\./gi), "");					
+				media.mimeType = mimeType.getMimeType(ext);
+				if (media.mimeType == null) {media.mimeType = "";}
+				
+				// Default Images and SWFs duration
+				if (media.mimeType.indexOf("image") >= 0 || media.mimeType.indexOf("application/x-shockwave-flash") >= 0)
+				{
+					media.duration = _appManager.currentAccount.defaultDuration;
+				}				
+				
+				_medias.addItem(media);
+				btnSave.visible = true;
+				btnCancel.visible = true;		
+
+				// Get the Thumbnail and the dimensions of this media
+				// We will need a blank canvas for this wo render properly
+				this.parentDocument.enabled = false;
+				var mediaInfo:MediaInfo = new MediaInfo(workGroup);
+				mediaInfo.addEventListener(MediaInfo.MEDIA_INFO_COMPLETE, mediaInfoCompleteHandler);
+				mediaInfo.addEventListener(MediaInfo.MEDIA_INFO_ERROR, mediaInfoCompleteHandler);
+				mediaInfo.updateMedia(media);
+				_addedMedia = media;
+			}
+			
+			private function mediaInfoCompleteHandler(event:Event):void
+			{
+				event.target.stopTimeout();
+				
+				if (!event.target.success)
+				{
+					Alert.show("Could not determine the height and width of the media. \r\n It is possible the media is in the wrong format", "Media Error"); 
+				}
+				
+				// The media object was upadated by the MediaInfo class
+				// If this is an MP3, try check if there is an image associated with it
+				if (_addedMedia.mediaType == Constants.MEDIA_TYPE_AUDIO)
+				{
+					var mp3Info:MP3Image = new MP3Image();
+					mp3Info.addEventListener(MP3Image.MP3_INFO_COMPLETE, mp3InfoHandler);
+					mp3Info.addEventListener(MP3Image.MP3_INFO_ERROR, mp3InfoHandler);
+					mp3Info.load(File(_addedMedia.file).url);
+				}
+				else
+				{
+					this.parentDocument.enabled = true;
+				}
+			}
+			
+			private function mp3InfoHandler(event:Event):void
+			{
+				try
+				{
+					var mp3Info:MP3Image = event.target as MP3Image; 
+					mp3Info.removeEventListener(MP3Image.MP3_INFO_COMPLETE, mp3InfoHandler);
+					mp3Info.removeEventListener(MP3Image.MP3_INFO_ERROR, mp3InfoHandler);
+					
+					// If we found an image use it
+					if (mp3Info.success && mp3Info.bitmapData != null)
+					{
+						_addedMedia.thumbBmpData = mp3Info.bitmapData;
+						_addedMedia.width = _addedMedia.thumbBmpData.width.toString();
+						_addedMedia.height = _addedMedia.thumbBmpData.height.toString();
+						_addedMedia.refresh = true;
+					}
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+				}
+				finally
+				{
+					this.parentDocument.enabled = true;
+				}
+			}
+			
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				
+				// Find oyt how many files we are working with. 
+				// We need it for the progress bar 
+				_updateCount = -1;	
+				_updateTotal = 0;
+				for each (var media:Medias in _medias)
+				{
+					if (media.updated || !media.uploaded) {_updateTotal ++;}
+				}
+				
+				_saveIndex = -1;
+				saveMediaChanges(null);
+				this.parentDocument.enabled = false;
+				
+				_winMediaUpdate = new WinMediaUpdate();
+				_winMediaUpdate.showCloseButton = true;
+				PopUpManager.addPopUp(_winMediaUpdate, this);
+			}
+			
+			private function saveMediaChanges(event:UpdateMediaEvent):void
+			{
+				// Loop until we find a file to update
+				var media:Medias;
+				do 
+				{
+					_saveIndex ++;
+					if (_saveIndex >= _medias.length) 
+					{
+						reloadMedia();
+						return;
+					}					
+					
+					media = _medias[_saveIndex];
+					if (media.updated)
+					{
+						this.callLater(updateItem);
+						return;
+					}
+				} while (_saveIndex < _medias.length);
+			}
+			
+			
+			private function updateItem():void
+			{
+				var media:Medias = _medias[_saveIndex];
+				
+				var message:String = media.uploaded ? "Updating " : "Uploading ";
+				message += media.name;
+				
+				_updateCount ++;
+				_winMediaUpdate.percentComplete = _updateCount / _updateTotal;
+				_winMediaUpdate.message = message;
+
+				_mediaControl.update(media, saveMediaChanges);				
+			}
+			
+
+			protected function btnCancel_clickHandler(event:MouseEvent):void
+			{
+				Alert.show("All your changes will be lost. Do you want to continue?", "Cancel Changes", 
+					Alert.YES | Alert.NO, null, cancelAnswerHandler, null, Alert.NO);
+			}
+			
+			private function cancelAnswerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.NO) {return;}
+				
+				// Reload everything. It is easiest. Plus, we get any updates from other users
+				reloadMedia();
+			}
+			
+			private function reloadMedia():void
+			{
+				if (_winMediaUpdate != null)
+				{
+					_winMediaUpdate.message "Realoading media";
+				}
+			
+				hideDetail();
+				_medias.removeAll();
+				_appManager.medias = null;	// Force the main app to reload
+				btnSave.visible = false;
+				btnCancel.visible = false;
+
+				this.parentDocument.enabled = false;
+				var sql:String = "Select * from Medias where accountId='";
+				sql += _appManager.currentUser.accountId + "'";						
+				_appManager.sdb.select(sql, mediaLoadHandler, Medias);
+			}
+			
+			private function progressHandler(event:ProgressEvent):void
+			{
+				if (_winMediaUpdate != null)
+				{
+					var filesComplete:Number = _updateCount / _updateTotal;
+					var uploadComplete:Number = event.bytesLoaded / event.bytesTotal;
+					if (uploadComplete > .9) { uploadComplete = .9;}	// Avoid jumping around
+					uploadComplete = uploadComplete / _updateTotal; // We only want progress for one section
+					
+					_winMediaUpdate.percentComplete = filesComplete + uploadComplete; 
+				}
+			}
+
+		]]>
+	</fx:Script>
+	<!-- This is only used for creating thumbnails -->
+	<s:Group id="workGroup" />			 
+	<s:VGroup x="0" y="0" width="100%" height="100%" paddingLeft="10" paddingRight="10" paddingTop="10" paddingBottom="10">
+		<s:BorderContainer height="100%" width="100%">
+			<s:List x="5" y="5" height="100%" width="100%" itemRenderer=" com.stratoscreen.renderers.MediaItem" dataProvider="{_medias}" borderVisible="false" >
+				<s:layout>
+					<s:TileLayout orientation="rows"/>
+				</s:layout>			
+			</s:List>
+			<mx:SWFLoader id="swfLoading" horizontalCenter="0" verticalCenter="0" width="25%" height="25%" 
+						  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true" visible="{!this.parentDocument.enabled}"/>			
+		</s:BorderContainer>
+		<view:GroupMediaDetail id="groupDetail" width="100%" />
+		<s:HGroup width="100%">
+			<s:Button id="btnAdd" label="Add file ..." click="btnAdd_clickHandler(event)" />
+			<mx:Spacer width="100%" />
+			<s:Button id="btnSave" label="Save" click="btnSave_clickHandler(event)" />
+			<s:Button id="btnCancel" label="Cancel" click="btnCancel_clickHandler(event)"/>
+		</s:HGroup>
+	</s:VGroup>	
+</s:NavigatorContent>

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*"
+			   minWidth="600" minHeight="300" title="Select  Channel"  close="closeHandler(event)" creationComplete="creationCompleteHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Channels;
+			import com.stratoscreen.renderers.ChannelItem;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+			
+			[Bindable] private var _channels:ArrayCollection;
+			private var _appManager:AppManager;
+			private var _canceled:Boolean = true;
+			private var _selectedChannel:Channels = null;
+			
+			public function get canceled():Boolean
+			{
+				return _canceled;
+			}
+			
+			public function get selectedChannel():Channels
+			{
+				return _selectedChannel;
+			}
+			
+			public function itemClick(item:ChannelItem):void
+			{
+				_selectedChannel = item.data as Channels;
+				_canceled = false;
+				closeHandler(null);
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				
+				_appManager = this.parentApplication.appManager;
+				_appManager.currentEditWindow = this;	// Make sure this is set back after it is closed
+				
+				searchBox.addEventListener(SearchBox.SEARCH_SEARCH, searchHandler);
+				searchBox.addEventListener(SearchBox.SEARCH_CLEARED, searchHandler);
+				
+				this.enabled = false;
+				
+				var sql:String = "Select * from Channels where accountId='";
+				sql += _appManager.currentUser.accountId + "'";
+				_appManager.sdb.select(sql, loadChannelsHandler, Channels);
+			}
+			
+			private function loadChannelsHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not load Channels. Please try again later", "Load Error");
+					return;
+				}
+				
+				_channels = new ArrayCollection();
+				_channels.source = event.result as Array;				
+				_channels.filterFunction = filterChannels;
+								
+				// Default to a sort by name
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name", true)];				
+				_channels.sort = sort;
+				_channels.refresh();		
+			}
+			
+			
+			protected function closeHandler(event:CloseEvent):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+			
+			private function filterChannels(item:Object):Boolean
+			{
+				if (item.deleted) {return false;} // Always hide the deleted itens
+				
+				var channelName:String = item.name.toLowerCase();
+				var searchText:String = searchBox.txtSearch.text.toLowerCase();
+				searchText = StringUtil.trim(searchText);
+				
+				return channelName.indexOf(searchText) >= 0;
+			}
+			
+			private function searchHandler(event:Event):void
+			{
+				_channels.refresh();
+			}
+		]]>
+	</fx:Script>
+	<s:List itemRenderer=" com.stratoscreen.renderers.ChannelItem" dataProvider="{_channels}" borderVisible="false" left="5" top="35" bottom="5" right="5">
+		<s:layout>
+			<s:TileLayout orientation="rows"/>
+		</s:layout>			
+	</s:List>
+	<components:SearchBox id="searchBox" right="5" top="5" width="50%" />
+
+	<mx:SWFLoader id="swfLoading" visible="{!this.enabled}" horizontalCenter="0" verticalCenter="0" width="100" height="100" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>
+
+	<s:controlBarContent>	
+	</s:controlBarContent>
+</s:TitleWindow>

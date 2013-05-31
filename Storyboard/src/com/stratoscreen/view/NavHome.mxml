@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:view="com.stratoscreen.view.*"
+		 width="100%" height="100%" creationComplete="creationCompleteHandler(event)" show="showHandler(event)"  xmlns:panels="com.stratoscreen.view.panels.*">
+
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.aws.SESClass;
+			import com.stratoscreen.aws.SESEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Accounts;
+			import com.stratoscreen.model.domains.Medias;
+			import com.stratoscreen.model.domains.Settings;
+			import com.stratoscreen.renderers.*;
+			import com.stratoscreen.utils.SharedUtils;
+			import com.stratoscreen.view.panels.SampleContent;
+			import com.stratoscreen.view.panels.VerifyEmail;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			private var _appManager:AppManager;
+			private var _shown:Boolean = false;
+			private var _winProfileEdit:WinProfileEdit;
+			private var _verifiedEmails:Array;
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+			
+			
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (!_shown)
+				{
+					if (_appManager.currentUser.type == Constants.USER_TYPE_MANAGER)
+					{						
+						// Show the sample content warning
+						if (!_appManager.currentAccount.sampleContentBool)
+						{
+							var skipWarning:Boolean = SharedUtils.getValue(SampleContent.SKIP_WARNING, false) as Boolean;
+							if (!skipWarning)
+							{
+								var sample:SampleContent = new SampleContent();
+								groupMain.addElementAt(sample, 0);
+							}
+						}
+
+						// Get the list of verified emails. To make sure this user is on it
+						_appManager.ses.listVerfied(listVerifiedHandler);	
+						
+						// Get the settings file too. We will need that setting up Cloudfront
+						_appManager.sdb.select("Select * from Settings", querySettingsHandler, Settings);
+						
+						// Get the Medias too. We always need them for the entire app
+						var sql:String = "Select * from Medias where accountId='" + _appManager.currentUser.accountId + "'";						
+						_appManager.sdb.select(sql, mediaLoadHandler, Medias);
+						
+						this.parentApplication.enabled = false;						
+					}
+					else
+					{
+						panelLinks.removeElement(linkAccount);
+						groupMain.removeElement(panelUsers);						
+					}
+					_shown = true;			
+					
+					// Turn on the billing icon
+					if (_appManager.currentAccount.billingType == Accounts.BILLING_NONE)
+					{
+						if (linkBilling != null) 
+						{
+							try
+							{
+								groupLinks.removeElement(linkBilling);
+							}
+							catch (err:Error) {/* ignore */}
+							linkBilling = null;
+						}
+					}
+					else
+					{
+						if (linkBilling != null) {linkBilling.visible = true;}
+					}
+					
+					configSession();
+				}
+			}
+			
+			private function mediaLoadHandler(event:SDBEvent):void
+			{
+				this.parentApplication.enabled = true;
+				if (!event.success)
+				{
+					Alert.show("Could not load Medias folder. Please restart the application and try again", "Load Error", Alert.OK, null, answerHandler);
+				}
+				
+				_appManager.medias = event.result as Array;
+			}
+			
+			private function answerHandler(event:CloseEvent):void
+			{
+				NativeApplication.nativeApplication.exit();
+			}
+			
+			private function configSession():void
+			{
+				// Set up all the renderers. They will need some info before being uses
+				var s3Endpoint:String = AWSRegions.getAWSEndpoint(_appManager.regionId).s3; 
+				
+				MediaItem.S3Endpoint = s3Endpoint; 
+				MediaItem.bucket = _appManager.currentAccount.bucket;
+				MediaGroupItem.S3Endpoint =  s3Endpoint;
+				MediaGroupItem.bucket = _appManager.currentAccount.bucket;
+				MediaOverlayItem.S3Endpoint =  s3Endpoint;
+				MediaOverlayItem.bucket = _appManager.currentAccount.bucket;				
+				MediaGroupOverlayItem.S3Endpoint =  s3Endpoint;
+				MediaGroupOverlayItem.bucket = _appManager.currentAccount.bucket;				
+				MediaThumbItem.S3Endpoint =  s3Endpoint;
+				MediaThumbItem.bucket = _appManager.currentAccount.bucket;
+				DragMediaItem.S3Endpoint = s3Endpoint;
+				DragMediaItem.bucket = _appManager.currentAccount.bucket;
+				ChannelItem.S3Endpoint = s3Endpoint;
+				ChannelItem.bucket = _appManager.currentAccount.bucket;								
+				ChannelDetailItem.S3Endpoint = s3Endpoint;
+				ChannelDetailItem.bucket = _appManager.currentAccount.bucket;				
+				ScreenItem.S3Endpoint = s3Endpoint;
+				ScreenItem.bucket = _appManager.currentAccount.bucket;
+				ScheduleDetailItem.S3Endpoint = s3Endpoint;
+				ScheduleDetailItem.bucket = _appManager.currentAccount.bucket;				
+			}
+			
+			private function listVerifiedHandler(event:SESEvent):void
+			{
+				// Look through the verfified emails and see if we are there
+				_verifiedEmails = SESClass.verifiedListToArray(event.result);
+								
+				if (!isCurrentUserVerified())
+				{
+					var verifyEmail:VerifyEmail = new VerifyEmail();
+					groupMain.addElementAt(verifyEmail, 0);					
+				}
+				
+			}
+			
+			private function querySettingsHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not query Account Setting. Please restart application and try again later", "Query Error");
+					return;
+				}		
+
+				_appManager.settings = event.result[0];
+			}
+			
+			private function isCurrentUserVerified():Boolean
+			{
+				// Loop through and look for a match
+				for (var i:int = 0; i < _verifiedEmails.length; i++)
+				{
+					if (_appManager.currentUser.email.toLowerCase() == _verifiedEmails[i].toLowerCase())
+					{
+						return true;
+					}
+				}
+
+				return false;
+			}
+			
+			protected function linkProfile_clickHandler(event:MouseEvent):void
+			{
+				_winProfileEdit = new WinProfileEdit();
+				_winProfileEdit.addEventListener(CloseEvent.CLOSE, winProfileEditCloseHandler);
+				PopUpManager.addPopUp(_winProfileEdit, this.parentApplication as DisplayObject, true); 
+			}
+			
+			private function winProfileEditCloseHandler(event:CloseEvent):void
+			{
+				if (_winProfileEdit.canceled) {return;}
+					
+				_appManager.currentUser = _winProfileEdit.user;
+								
+				// Check to see if this email can send emails
+				if (_appManager.currentUser.type != Constants.USER_TYPE_MANAGER) {return;}
+				if (isCurrentUserVerified())
+				{
+					// Check to see if there is a warning message. If yes, remove it
+					// First make sure we are not warning the user already
+					for (var i:int = 0; i < groupMain.numElements; i++)
+					{
+						if (groupMain.getElementAt(i) is VerifyEmail) 
+						{
+							groupMain.removeElementAt(i);
+							return;
+						}
+					}					
+				}
+				else
+				{
+					// First make sure we are not warning the user already
+					for (i = 0; i < groupMain.numElements; i++)
+					{
+						if (groupMain.getElementAt(i) is VerifyEmail) {return;}
+					}
+					
+					// Add the warning message
+					var verifyEmail:VerifyEmail = new VerifyEmail();
+					groupMain.addElementAt(verifyEmail, 0);										
+				}
+			}
+
+			protected function linkPassword_clickHandler(event:MouseEvent):void
+			{
+				PopUpManager.createPopUp(this.parentApplication as DisplayObject, WinPasswordEdit, true);
+			}
+
+			protected function linkAccount_clickHandler(event:MouseEvent):void
+			{
+				PopUpManager.createPopUp(this.parentApplication as DisplayObject, WinAccountEdit, true);
+			}
+
+			protected function linkBilling_clickHandler(event:MouseEvent):void
+			{
+				this.parentApplication.storyboard.showBilling();				
+			}
+			
+		]]>
+	</fx:Script>
+
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<s:Group id="groupLinks" x="0" y="0" width="100%" height="100%">
+		<s:Panel width="165" right="10" top="10" id="panelLinks" title="Quick Links" styleName="Group" >
+			<s:layout>
+				<s:VerticalLayout/>
+			</s:layout>
+			<mx:Spacer/>
+			<mx:LinkButton x="10" y="26" label="My Profile"  icon="@Embed(source='/assets/icons/user.png')" id="linkProfile" click="linkProfile_clickHandler(event)" width="100%"/>
+			<mx:LinkButton x="10" y="60" label="Change Password"  icon="@Embed(source='/assets/icons/key.png')" id="linkPassword" click="linkPassword_clickHandler(event)" width="100%"/>
+			<mx:LinkButton label="Edit Account Details" id="linkAccount" width="100%" click="linkAccount_clickHandler(event)" icon="@Embed(source='/assets/icons/group.png')"/>
+			<mx:LinkButton id="linkBilling" width="100%" label="Billing"  click="linkBilling_clickHandler(event)"
+						   icon="@Embed(source='/assets/icons/money_dollar.png')" visible="false"/>
+			<mx:Spacer/>
+		</s:Panel>
+		<s:VGroup id="groupMain" left="10" top="10" right="184" bottom="10">
+			<panels:ScreenSummary width="100%"/>
+			<panels:MediaSummary width="100%"/>
+			<panels:Quotas id="panelQuotas" width="100%" />
+			<panels:UserSummary id="panelUsers" width="100%" />
+		</s:VGroup>
+	</s:Group>
+</s:NavigatorContent>

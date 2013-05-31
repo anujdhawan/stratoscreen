@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" 
+		 width="70" height="33" creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			
+			public static const TAB_CLICKED:String = "TAB_CLICKED";
+			[Bindable] public var label:String;
+			[Bindable] public var _selected:Boolean = false;
+			
+			public function get selected():Boolean
+			{
+				return _selected
+			}
+
+			public function set selected(value:Boolean):void
+			{
+				if (lblLabel == null) {return;}	// Still drawing
+				_selected = value;
+				
+				if (selected)
+				{
+					borderTab.styleName = "TabButtonSelected";
+					lblLabel.styleName = "TabButtonSelected";
+				}
+				else
+				{
+					borderTab.styleName = "TabButtonUnselected";
+					lblLabel.styleName = "TabButtonUnselected";					
+				}
+			}
+			
+			private function tabClick(event:MouseEvent):void
+			{
+				this.dispatchEvent(new Event(TAB_CLICKED));
+			}
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{				
+				this.selected = _selected; // Rendering may have been skipped on start up	
+			}
+
+		]]>
+	</fx:Script>
+	<s:BorderContainer id="borderTab" x="0" y="0" width="70" height="34"
+					   click="tabClick(event)" styleName="TabButtonUnselected">
+		<s:Label id="lblLabel" text="{label}" horizontalCenter="0" verticalCenter="-2" width="100%" 
+				 click="tabClick(event)" styleName="TabButtonUnselected"/>
+	</s:BorderContainer>
+	<s:BorderContainer id="borderCover" x="0" y="30" width="70" height="4" borderVisible="false"/>
+	<s:Line xFrom="0" xTo="70" yFrom="30" yTo="30" visible="{!_selected}">
+		<s:stroke>
+			<s:SolidColorStroke color="0x808080" weight="1" caps="square"/>
+		</s:stroke>
+	</s:Line>
+</s:Group>

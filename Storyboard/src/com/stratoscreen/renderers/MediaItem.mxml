@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*" 
+				autoDrawBackground="true" width="128" height="100" doubleClickEnabled="true" doubleClick="doubleClickHandler(event)"
+				creationComplete="creationCompleteHandler(event)" >	
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.ImageCacheManager;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.MediaGroupDetail;
+			import com.stratoscreen.model.domains.Medias;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.utils.Utils;
+			import com.stratoscreen.view.Storyboard;
+			import com.stratoscreen.view.WinMediaEdit;
+			import com.stratoscreen.view.WinMediaGroupEdit;
+			import com.stratoscreen.view.WinSelectMedia;
+			
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;			
+			import mx.managers.PopUpManager;
+
+			[Bindable][Embed(source="/assets/icons/delete.png")]
+			private var iconClear:Class;
+			[Bindable][Embed(source="/assets/icons/image.png")]
+			private var iconImage:Class;
+			[Bindable][Embed(source="/assets/icons/swf.png")]
+			private var iconSWF:Class;
+			[Bindable][Embed(source="/assets/icons/film.png")]
+			private var iconVideo:Class;
+			[Bindable][Embed(source="/assets/icons/audio.png")]
+			private var iconAudio:Class;
+			
+			public static var bucket:String;
+			public static var S3Endpoint:String;
+			private static var _appManager:AppManager;	
+			private static var _storyboard:Storyboard;
+
+			[Bindable] private var _media:Medias;
+			[Bindable] private var _groupDetail:MediaGroupDetail = null;
+			[Bindable] private var _showClear:Boolean;
+			private var _removing:Boolean = false;
+			private var _imageUtils:ImageUtils;
+			
+			public function get removing():Boolean
+			{
+				return _removing;
+			}
+			
+			public function get mediaDetail():MediaGroupDetail
+			{
+				return _groupDetail;
+			}
+
+			public override function set data(value:Object):void
+			{
+				if (value== null) {return;}
+				if (groupMain == null) {return;}		// Item is still renderering		
+				if (_groupDetail == null)
+				{
+					if (super.data == value && !value.refresh) {return;}	// There is no change
+				}
+
+				super.data = value;
+				
+				if (_imageUtils == null) {_imageUtils = new ImageUtils();}
+				
+				if (_appManager == null) {_appManager = this.parentApplication.appManager;}
+				
+				// We use the renderer for the Medias and MediaGroups
+				if (value is MediaGroupDetail)
+				{
+					_groupDetail = value as MediaGroupDetail;
+					_media = new Medias();					
+					_media.itemName = _groupDetail.mediaId;
+					_media.name = _groupDetail.name;
+					_media.mimeType = _groupDetail.mimeType;
+					_showClear = true;
+				}
+				else if (value is Medias)
+				{
+					_media = value as Medias;
+					
+					// We need teh clear button for certain edit windows
+					if (_appManager.currentEditWindow is WinMediaGroupEdit)
+					{	
+						_showClear = true;						
+					}	
+					else
+					{
+						_showClear = !_media.uploaded;
+					}
+				}
+				else
+				{
+					// This must of been dragged. Create the needed objects
+					_media = Utils.copyClassObject(Medias, value);
+					
+					_groupDetail = new MediaGroupDetail();					
+					_groupDetail.accountId = _appManager.currentAccount.itemName;
+					_groupDetail.mimeType = _media.mimeType;
+					_groupDetail.frames = _media.frames;
+					_groupDetail.duration = _media.duration;
+					_groupDetail.height = _media.height;
+					_groupDetail.width = _media.width;
+					_groupDetail.createdBy = _appManager.currentUser.itemName;
+					_groupDetail.modifiedBy = _appManager.currentUser.itemName;
+				}
+				
+				
+				_media.refresh = false;
+				swfLoading.visible = true;
+				imgThumb.visible = false;
+				
+				if (!btnClear.hasEventListener(MouseEvent.CLICK))
+				{
+					btnClear.addEventListener(MouseEvent.CLICK, clearHandler);
+				}
+				
+				// Use the bitmap data to create the thumnail if it is included
+				// Other wise attempt to get the Thumbnail from the server
+				if (_media.thumbBmpData == null)
+				{
+					// Skip this is not uploaded. There will not be a thumbnail
+					if (!_media.uploaded) {return;}
+					
+					var thumbUrl:String = "https://" + S3Endpoint + "/" + bucket;					
+					thumbUrl += "/" + Constants.THUMB_PREFIX + _media.itemName + Constants.THUMB_EXTENSION; ;
+					imgThumb.source = ImageCacheManager.getInstance().getImageByURL(thumbUrl);
+					imgThumb.load();
+				}
+				else
+				{
+					var expandImage:Boolean = false;
+					if (_media.mediaType == Constants.MEDIA_TYPE_AUDIO) {expandImage = true;}
+					var bitmap:Bitmap = new Bitmap(_media.thumbBmpData);
+					var rect:ResizeRectangle = _imageUtils.getBestFit(bitmap.width, bitmap.height, groupMain.width, groupMain.height,expandImage );
+					imgThumb.source = bitmap;
+					imgThumb.x = rect.x;
+					imgThumb.y = rect.y;
+					imgThumb.width = rect.width;
+					imgThumb.height = rect.height;
+					
+					imgThumb.visible = true;
+					swfLoading.visible = false;
+				}
+				
+				switch (_media.mediaType)
+				{
+					case Constants.MEDIA_TYPE_IMAGE:
+						imgType.source = iconImage;
+						imgType.toolTip = "Image";
+						break;
+					
+					case Constants.MEDIA_TYPE_SWF:
+						imgType.source = iconSWF;
+						imgType.toolTip = "Flash (SWF)";
+						break;
+					
+					case Constants.MEDIA_TYPE_VIDEO:
+						imgType.source = iconVideo;
+						imgType.toolTip = "Video";
+						break;
+					
+					case Constants.MEDIA_TYPE_AUDIO:
+						imgType.source = iconAudio;
+						imgType.toolTip = "Audio";
+						break;
+				}
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				rectDrag.visible = false;
+				this.data = _media;		// Draw the renderer
+				_storyboard = this.parentApplication.storyboard;	
+				_appManager = this.parentApplication.appManager;
+				_imageUtils = new ImageUtils();
+			}
+			
+			private function clearHandler(event:MouseEvent):void
+			{
+				if (_appManager.currentEditWindow is WinMediaGroupEdit)
+				{
+					WinMediaGroupEdit(_appManager.currentEditWindow).removeMediaItem(_media);
+				}
+				else
+				{
+					_removing = true;
+					_storyboard.navMedia.navMediaMedia.removeItem(this);
+				}
+				
+				event.stopImmediatePropagation();
+			}
+			
+			private function itemClickHandler(event:MouseEvent):void
+			{
+				// We may be reusing the control in other windows
+				if (_appManager.currentEditWindow is WinSelectMedia)
+				{
+					WinSelectMedia(_appManager.currentEditWindow).itemClick(this);
+				}
+				else if (_appManager.currentEditWindow is WinMediaGroupEdit)
+				{
+					WinMediaGroupEdit(_appManager.currentEditWindow).selectItem(_media);
+				}
+				else
+				{
+					_storyboard.navMedia.navMediaMedia.itemClick(this);
+				}
+				event.stopImmediatePropagation();
+			}
+			
+			protected function imgThumb_completeHandler(event:Event):void
+			{
+				var rect:ResizeRectangle = _imageUtils.getBestFit(event.target.content.width, event.target.content.height, 
+					                                             groupMain.width, groupMain.height, false );
+				imgThumb.x = rect.x;
+				imgThumb.y = rect.y;
+				imgThumb.width = rect.width;
+				imgThumb.height = rect.height;
+				
+				imgThumb.visible = true;
+				swfLoading.visible = false;
+			}
+
+
+			protected function imgThumb_ioErrorHandler(event:IOErrorEvent):void
+			{
+				imgThumb.visible = false;
+				swfLoading.visible = false;
+			}
+
+
+			protected function doubleClickHandler(event:MouseEvent):void
+			{
+				// Do not allow double click in Group Editor
+				// treat as a single click
+				if (_appManager.currentEditWindow is WinMediaGroupEdit)
+				{
+					WinMediaGroupEdit(_appManager.currentEditWindow).selectItem(_media);
+					
+					// Open the item for edit too
+					var mediaEdit:WinMediaEdit = new WinMediaEdit();
+					mediaEdit.media = _media;
+					mediaEdit.addEventListener(CloseEvent.CLOSE, subWindowCloseHandler);
+					PopUpManager.addPopUp(mediaEdit, this.parentApplication as DisplayObject, true);
+					
+					// The app only expects one edit window open at a time. 
+					// ... this kinda changes things
+					// ... I am ready for version 2.0 already
+					this.parentApplication.appManager.currentEditWindow = mediaEdit; 
+
+					return;
+				}
+				
+				// open the detail
+				_storyboard.navMedia.navMediaMedia.itemClick(this);
+				
+				if (_appManager.currentUser.type == Constants.USER_TYPE_MANAGER || _media.createdBy == _appManager.currentUser.itemName)
+				{
+					_storyboard.navMedia.navMediaMedia.groupDetail.editMedia();
+				}
+				event.stopImmediatePropagation();
+			}
+
+			private function subWindowCloseHandler(event:CloseEvent):void
+			{
+				// Reset the current edit window to WinChannelEdit
+				this.parentApplication.appManager.currentEditWindow = this.parentDocument.parentDocument;
+			}
+		]]>
+	</fx:Script>
+	<!-- Add the rectangle just to show up when dragging -->
+	<s:Rect id="rectDrag" width="100%" height="100%">
+		<s:stroke>
+			<s:SolidColorStroke color="0x00CC00" weight="2"/>
+		</s:stroke>			
+		<s:fill>
+			<s:LinearGradient rotation="45">
+				<s:entries>
+					<s:GradientEntry color="0xF0F0F0" ratio=".50"/>
+				</s:entries>					
+			</s:LinearGradient>			
+		</s:fill>
+	</s:Rect>
+	<s:Group id="groupMain" height="84" width="128" x="0" y="0" click="itemClickHandler(event)" >
+		<mx:SWFLoader id="swfLoading" horizontalCenter="0" verticalCenter="0" width="50%" height="50%" 
+					  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>
+		<mx:Image id="imgThumb" scaleContent="true" maintainAspectRatio="true" smoothBitmapContent="true" complete="imgThumb_completeHandler(event)" ioError="imgThumb_ioErrorHandler(event)"/>
+		<s:BorderContainer id="borderCover" visible="{!_media.uploaded}" height="100" width="100%" styleName="NotUploaded" borderVisible="false" backgroundAlpha="0.66"/>
+		<components:IconButton right="0" top="0" id="btnClear" icon="{iconClear}" visible="{_showClear}" />
+	</s:Group>
+	<mx:Image id="imgType" width="16" height="16"  left="0" bottom="0"/>
+	<s:Label id="lblName" width="100%" text="{_media.name}" height="16" textAlign="center" bottom="0" verticalAlign="middle" 
+			 click="itemClickHandler(event)" maxDisplayedLines="1"  left="16"/>	
+</s:ItemRenderer>

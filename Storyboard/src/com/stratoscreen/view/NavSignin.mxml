@@ -1,0 +1,559 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009"
+					xmlns:s="library://ns.adobe.com/flex/spark"
+					xmlns:mx="library://ns.adobe.com/flex/mx"
+					width="100%" height="100%" creationComplete="creationCompleteHandler(event)"
+					currentState="stratoProvider">
+	<s:states>
+		<s:State name="stratoProvider"/>
+		<s:State name="privateProvider"/>
+	</s:states>
+	<fx:Declarations>
+		<mx:EmailValidator id="validEmail" source="{txtUserEmail}" property="text" />
+		<mx:StringValidator id="validPassword" source="{txtPassword}" property="text" minLength="{Constants.MINIMUM_PASSWORD_LENGTH}" />		
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.SDBClass;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.*;
+			import com.stratoscreen.utils.LogUtils;
+			import com.stratoscreen.utils.SecurityUtils;
+			import com.stratoscreen.utils.SharedUtils;
+			import com.stratoscreen.utils.XMLUtils;
+			import com.stratoscreen.view.panels.NewVersion;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.ArrayList;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.CursorManager;
+			import mx.managers.PopUpManager;
+			
+			import spark.events.IndexChangeEvent;
+						
+			
+			private var _appManager:AppManager;
+			private var _signOnSDB:SDBClass;
+			private var _winPartial:WinCompletePartialSetup;
+			[Bindable] private var _providers:ArrayCollection;
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager; 
+				_providers = new ArrayCollection();
+				
+				SecurityUtils.globalCode = Constants.KEY_PREFIX ;
+				SecurityUtils.localCode = _appManager.localKey;				
+				
+				htmlNews.location = _appManager.newsUrl;
+				chkRemember.selected = SharedUtils.getValue(chkRemember.name, false) as Boolean;
+				txtUserEmail.text = SharedUtils.getValue(txtUserEmail.name, "").toString();
+				var encryptedPwd:String = SharedUtils.getValue(txtPassword.name, "").toString();
+				if (encryptedPwd != "")
+				{
+					txtPassword.text = SecurityUtils.simpleDecrypt(encryptedPwd, 0, _appManager.localKey);
+				}
+				
+				// Get the current version too
+				var request:URLRequest = new URLRequest(_appManager.versionUrl);
+				request.useCache = false;
+				
+				var urlLoaderVersion:URLLoader = new URLLoader();
+				urlLoaderVersion.addEventListener(Event.COMPLETE, versionLoaderComplete);
+				urlLoaderVersion.addEventListener(IOErrorEvent.IO_ERROR, versionLoaderError);
+				urlLoaderVersion.load(request);
+				
+				loadProviders();
+			}
+			
+			private function loadProviders():void
+			{
+				// Check top see if we are a using a private provider
+				var providerCode:String = SharedUtils.getValue(Constants.PRIVATE_CODE, "").toString();
+				if (providerCode == "") 
+				{
+
+					// Add a an enytry to allow the user to add a private network
+					var item:Object = new Object();
+					item.label = "Private Provider";
+					item.id = "";
+					_providers.addItem(item);
+					
+					// Get the provider list
+					var urlLoader:URLLoader = new URLLoader();
+					urlLoader.addEventListener(Event.COMPLETE, providerLoaderComplete);
+					urlLoader.addEventListener(IOErrorEvent.IO_ERROR, providerLoaderError);
+					urlLoader.load(new URLRequest(_appManager.providersUrl));
+
+					this.enabled = false;
+					return;
+				} 
+					
+				this.currentState = "privateProvider";
+				_appManager.setWebBucket(providerCode);
+				SecurityUtils.installCode = providerCode;
+				loadPkg();
+			}
+			
+			private function providerLoaderComplete(event:Event):void
+			{
+				try
+				{
+					this.enabled = true;
+					var result:Object = XMLUtils.stringToObject(event.target.data.toString());
+					
+					var resultArray:Array;
+					if (result.providers.provider is Array)
+					{
+						resultArray = result.providers.provider;
+					}
+					else
+					{
+						resultArray = [result.providers.provider];
+					}
+					
+					for (var i:int = resultArray.length - 1; i >= 0; i--)
+					{
+						_providers.addItemAt(resultArray[i], 0);
+					}
+					
+					var index:int = parseInt(SharedUtils.getValue(cboProviders.name, "0").toString());
+					if (index >= _providers.length) {index = 0;}
+					cboProviders.selectedIndex = index;
+					
+					if (index >= 0) {cboProviders_changeHandler(null);}
+				}
+				catch (err:Error)
+				{
+					Alert.show("An error occured while loading the data. Please restart the application and try again\r\n" +
+						       "Message:" + err.message, "Unexpected Error", 4, null, answerHandler);				
+				}
+			}
+
+			private function providerLoaderError(event:IOErrorEvent):void
+			{
+				CursorManager.removeBusyCursor();
+				this.enabled = true;
+			}
+			
+			private function versionLoaderComplete(event:Event):void
+			{
+				try
+				{
+					var version:String = event.target.data.toString();
+					if (version != _appManager.appVersion)
+					{
+						var versionPanel:NewVersion = new NewVersion();
+						borderNews.addElementAt(versionPanel,0);
+					}					
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);				
+				}				
+			}
+
+			private function versionLoaderError(event:IOErrorEvent):void
+			{
+				LogUtils.writeToLog(event.text);		
+			}
+			
+			private function loadPkg():void
+			{
+				CursorManager.setBusyCursor();
+				btnSignIn.enabled = false;
+				
+				// Determine the log url from the stored bucket
+				var index:int =  _appManager.accountBucket.toUpperCase().charCodeAt(0) - 64;	// 65 = 'A'
+				var endpoint:AWSEndpoint = AWSRegions.getAWSEndpoint(index);				
+				var url:String = "https://" + endpoint.s3 + "/" + _appManager.accountBucket.toLowerCase()  + "/" + _appManager.accountBucket.toLowerCase();
+				
+								
+				// Get the signon package. The PKG should have the same name as the bucket
+				var loader:URLLoader = new URLLoader();
+				loader.addEventListener(Event.COMPLETE, pkgHandler);
+				loader.addEventListener(SecurityErrorEvent.SECURITY_ERROR, pkgErrorHandler);
+				loader.addEventListener(IOErrorEvent.IO_ERROR, pkgErrorHandler);
+				loader.load(new URLRequest(url));				
+			}
+			
+			private function pkgHandler(event:Event):void
+			{
+				try
+				{
+					var DELIMETER:String = "\t";
+					CursorManager.removeBusyCursor();
+					
+					// Set the security utility so it can properly decrypt data
+					// Since all accounts use the main web bucket temporarily use
+					// the web bucket for both
+					SecurityUtils.accountCode = _appManager.accountBucket;
+					SecurityUtils.installCode = _appManager.accountBucket;
+					
+					var pkg:String = event.target.data;
+					pkg = SecurityUtils.simpleDecrypt(pkg, SecurityUtils.ACCOUNT_KEY);
+					
+					// Split up the 
+					var sections:Array = pkg.split(DELIMETER);
+					
+					_appManager.regionId = parseInt(sections[0]);
+					if (_appManager.regionId == 0) {throw new Error("Invalid region id in sign on package");}
+					
+					var accessKey:String = SecurityUtils.simpleDecrypt(sections[1]);
+					if (accessKey == null || accessKey == "") {throw new Error("Invalid access key in sign on package");}
+
+					var secretKey:String =SecurityUtils.simpleDecrypt(sections[2]);
+					if (secretKey == null || secretKey == "") {throw new Error("Invalid secret key in sign on package");}					
+
+					// Create SimpleDatabase class for this identity. We will throw away later
+					var awsEndpoint:AWSEndpoint = AWSRegions.getAWSEndpoint(_appManager.regionId); 					
+					_signOnSDB = new SDBClass(awsEndpoint.sdb, accessKey, secretKey);
+										
+					btnSignIn.enabled = true;
+					
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					Alert.show("Could not load signon package", "Error");		
+				}
+			}
+
+			private function pkgErrorHandler(event:Event):void
+			{
+				CursorManager.removeBusyCursor();
+
+				Alert.show("Could not load signon package", "Error");
+			}
+
+			protected function btnSignIn_clickHandler(event:MouseEvent):void
+			{
+				signOn();
+			}
+			
+			private function signOn():void
+			{
+				// Validate the entries
+				var message:String = "";
+				var result:ValidationResultEvent = validEmail.validate();
+				if (result.results != null)  {message = result.message;}
+				
+				result = validPassword.validate();
+				if (result.results != null)  {message = result.message;}
+				
+				if (message != "")
+				{
+					Alert.show(message, "Signon Error");
+					return;
+				}
+				
+				
+				this.enabled = false;
+				var sql:String = "Select * from Users where email = '" + txtUserEmail.text.toLowerCase() + "' ";
+				_signOnSDB.select(sql, signonHandler, Users);				
+			}
+			
+			private function signonHandler(event:SDBEvent):void
+			{
+				try
+				{
+					if (!event.success)
+					{
+						// Double check for an incorrect 
+						if (event.code == "AuthorizationFailure")
+						{
+							Alert.show("Could not authenticate the user id. Your provider may be incorrect");
+							this.enabled = true;
+							return;
+						}
+						
+						throw new Error(event.message);	
+					}
+					
+					if (event.result.length == 0)
+					{
+						txtUserEmail.errorString = "Invalid email and/or password";
+						txtPassword.errorString = txtUserEmail.errorString;
+						this.enabled = true;
+					}
+					else
+					{
+						// Get the identity to be used for this session
+						var user:Users = Users(event.result[0]);	// Assume one row
+						_appManager.currentUser = user;
+
+						// Check for disabled user
+						if (user.status == Users.STATUS_DISABLED)
+						{
+							Alert.show("Your acount has been disabled. Please contact your account administrator.", "Signin Error");
+							this.enabled = true;	
+							return;
+						}
+						
+						// Compare the passwords
+						if (user.decryptedPassword != txtPassword.text)
+						{
+							txtPassword.errorString = "Invalid password and/or Email";
+							Alert.show(txtPassword.errorString + ". Please try again.", "Signon Error"); 
+							this.enabled = true;	
+							return;
+						}
+						
+						var sql:String = "Select * from Identities where type = '" + user.type + "'";				
+						_signOnSDB.select(sql, queryIdentityHandler, Identities);	
+						
+						// Save the successful User
+						SharedUtils.setValue(chkRemember.name, chkRemember.selected);
+						if (chkRemember.selected)
+						{
+							SharedUtils.setValue(txtPassword.name, SecurityUtils.simpleEncrypt(txtPassword.text, 0, _appManager.localKey));
+							SharedUtils.setValue(txtUserEmail.name, txtUserEmail.text);
+						}
+						else
+						{
+							SharedUtils.setValue(txtPassword.name, "");
+							SharedUtils.setValue(txtUserEmail.name, "");							
+						}
+					}
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					Alert.show("An unexpected error occurred while signing on. Please try again", "Signon Error");
+				}
+			}
+
+			private function queryIdentityHandler(event:SDBEvent):void
+			{
+				try
+				{
+					// Get the identity to be used for this session
+					var identity:Identities = Identities(event.result[0]);	// Assume one row
+
+					_appManager.accessKey = identity.decryptedAccessKey;
+					_appManager.secretKey = identity.decryptedSecretKey;
+
+					// Get the Account info too
+					var sql:String = "Select * from Accounts where itemName() = '" + _appManager.currentUser.accountId + "'";
+					_appManager.sdb.select(sql, queryAccountHandler, Accounts);						
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					Alert.show("An unexpected error occurred while signing on. Please try again", "Signon Error");
+					this.enabled = true;
+				}
+			}
+			
+			private function queryAccountHandler(event:SDBEvent):void
+			{
+				try
+				{
+					_appManager.currentAccount = Accounts(event.result[0]);	// Assume one row
+					
+					// Reset the SecurityUtils. There may be some items encypted using the account bucket 
+					// as a key
+					SecurityUtils.accountCode = _appManager.currentAccount.bucket;
+					
+					// If this account partially setup
+					// This will occur when someone signs up online
+					if (_appManager.currentAccount.partial == "1")
+					{
+						// We must have a manager at this point
+						if (_appManager.currentUser.type != Constants.USER_TYPE_MANAGER)
+						{
+							Alert.show("This account is not complete. An account manager must sign in first to complete the registration.", 
+								       "Incomplete Setup",4,null, answerHandler);
+							return;	 
+						}
+						
+						// Run the partial setup
+						_winPartial = new WinCompletePartialSetup();
+						_winPartial.bucket = _appManager.currentAccount.bucket;
+						_winPartial.addEventListener(CloseEvent.CLOSE, winPartialCompleteHandler);
+						PopUpManager.addPopUp(_winPartial, this.parentApplication as DisplayObject);
+						return;
+					}
+					
+					// Switch to the Home
+					Storyboard(this.parentDocument).signedIn = true;
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);
+					Alert.show("An unexpected error occurred while signing on. Please try again", "Signon Error");
+					this.enabled = true;
+				}				
+			}
+			
+			private function answerHandler(event:Event):void
+			{
+				NativeApplication.nativeApplication.exit();
+			}
+			
+			private function winPartialCompleteHandler(event:Event):void
+			{
+				var message:String;
+				if (!_winPartial)
+				{
+					message = "The account could not be completed. Please restart and try again.\r\n" +
+						      "If the problem continues, please contact customer support for assistance";
+					return;
+				}
+				else
+				{
+					// Restart the signon process. It is the easiest. 
+					signOn();
+					return;
+				}
+				
+				Alert.show(message, "Setup Complete", 4, null, answerHandler);
+			}
+			
+
+			protected function htmlNews_uncaughtScriptExceptionHandler(event:HTMLUncaughtScriptExceptionEvent):void
+			{
+				// TODO Auto-generated method stub
+			}
+
+
+			protected function htmlNews_completeHandler(event:Event):void
+			{
+				// Capture all the links with _blank. We need to handle those automatically
+				var dom:Object = event.currentTarget.domWindow.document;
+				var links:Object = dom.getElementsByTagName("a");
+				
+				for(var i:Number = 0; i < links.length; i++)
+				{
+					if(links[i].target.toLowerCase() == "_blank" || links[i].target.toLowerCase() == "_new")
+						links[i].onclick = linkClickHandler;
+				}
+			}
+			
+			private function linkClickHandler(o:Object):void
+			{
+				navigateToURL(new URLRequest(o.currentTarget.href),"blank");
+			}
+
+
+			protected function cboProviders_changeHandler(event:IndexChangeEvent):void
+			{
+				// Are we loading a Private Network
+				if (cboProviders.selectedItem.id == "")
+				{
+					var winPrivate:WinPrivateProvider = new WinPrivateProvider();
+					winPrivate.addEventListener(CloseEvent.CLOSE, winPrivateCloseHandler);
+					PopUpManager.addPopUp(winPrivate, this.parentApplication as DisplayObject, true);
+					return;
+				}
+					
+				
+				SharedUtils.setValue(cboProviders.name, cboProviders.selectedIndex);
+				_appManager.setWebBucket(_providers[cboProviders.selectedIndex].id);
+				SecurityUtils.installCode = _providers[cboProviders.selectedIndex].id;
+				loadPkg();
+			}
+			
+			private function winPrivateCloseHandler(event:CloseEvent):void
+			{
+				var winPrivate:WinPrivateProvider = event.target as WinPrivateProvider;
+				winPrivate.removeEventListener(CloseEvent.CLOSE, winPrivateCloseHandler);
+				if (winPrivate.success) 
+				{
+					this.currentState = "privateProvider";
+					SharedUtils.setValue(cboProviders.name, "0");
+					_appManager.setWebBucket(winPrivate.code);
+					SecurityUtils.installCode = winPrivate.code;
+					loadPkg();
+				}
+			}
+
+			protected function lblForgot_clickHandler(event:MouseEvent):void
+			{
+				// First check to see if the password is valid
+				txtUserEmail.errorString = "";
+				txtPassword.errorString = "";				
+				this.enabled = false;
+				
+				var sql:String = "Select * from Users where email = '" + txtUserEmail.text.toLowerCase() + "' ";
+				_signOnSDB.select(sql, checkEmailHandler, Users);				
+			}
+			
+			private function checkEmailHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+
+				try
+				{
+					if (!event.success)
+					{
+						Alert.show("Could not validate email. Please try again later", "Server Error");
+						return;
+					}
+					
+					if (event.result.length == 0)
+					{
+						txtUserEmail.errorString = "Invalid email address";
+						return;
+					}
+					
+					Alert.show("Do you want to reset the password for " + txtUserEmail.text + "?", "Reset Password", 
+						       Alert.YES | Alert.NO, null, resetAnswerHandler, null, Alert.NO);
+					
+				}
+				catch (err:Error)
+				{
+					Alert.show("Could not validate email. Please try again later", "Unexpected Error");
+				}
+			}
+			
+			private function resetAnswerHandler(event:CloseEvent):void
+			{
+				if (event.detail == Alert.YES)
+				{
+					
+				}
+			}
+		]]>
+	</fx:Script>
+
+	<s:Group  width="100%" height="100%">
+		<s:Panel x="10" y="10" width="250" height="193" styleName="Group" title="Sign In"
+				 height.privateProvider="163">
+			<s:Label x="10" y="10" text="Email" height="20" fontWeight="bold"/>
+			<s:TextInput x="80" y="10" width="158" id="txtUserEmail" name="txtUserEmail" enter="signOn()"/>
+			<s:Label x="10" y="34" text="Password" height="20" fontWeight="bold"/>
+			<s:TextInput x="80" y="34" width="158" displayAsPassword="true" id="txtPassword" name="txtPassword" enter="signOn()"/>
+			<s:Button id="btnSignIn" y="118" label="Sign in" click="btnSignIn_clickHandler(event)"
+					  horizontalCenter="-10"
+					  y.privateProvider="91" horizontalCenter.privateProvider="-7"/>
+			<s:CheckBox id="chkRemember" x="80" y="85" label="Remember me" name="chkRemember"
+						x.privateProvider="81" y.privateProvider="61"/>
+			<s:Label x="10" y="61" text="Provider" height="20" fontWeight="bold" includeIn="stratoProvider"/>
+			<s:ComboBox x="80" y="58" width="158" fontSize="9" id="cboProviders" includeIn="stratoProvider" 
+						change="cboProviders_changeHandler(event)" dataProvider="{_providers}" 
+						labelField="label" />
+			
+			<!-- hidden for now -->
+			<s:Label id="lblForgot" visible="false" right="10" bottom="10" click="lblForgot_clickHandler(event)"
+					 color="#0000FF" mouseOut="{lblForgot.setStyle('textDecoration','none')}"
+					 mouseOver="{lblForgot.setStyle('textDecoration','underline')}"
+					 text="Forgot Password"/>
+		</s:Panel>
+		<s:BorderContainer id="borderNews" left="275" top="10" bottom="10" right="10" styleName="Panel">
+			<s:layout>
+				<s:VerticalLayout gap="15" paddingBottom="10" paddingLeft="10" paddingRight="10"
+								  paddingTop="10"/>
+			</s:layout>
+			<mx:HTML id="htmlNews" height="100%" width="100%" complete="htmlNews_completeHandler(event)"
+					 uncaughtScriptException="htmlNews_uncaughtScriptExceptionHandler(event)"/>	
+		</s:BorderContainer>
+	</s:Group>
+</s:NavigatorContent>

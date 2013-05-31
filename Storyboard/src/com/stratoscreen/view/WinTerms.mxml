@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" 
+			   xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="558" height="406" title="Terms of Use" 
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.resources.TermsEmbed;
+			
+			import flashx.textLayout.conversion.TextConverter;
+			
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ScrollEvent;
+			import mx.managers.PopUpManager;
+
+			private var _agreed:Boolean = false;	
+
+			public function get agreed():Boolean
+			{
+				return _agreed;
+			}
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.closeButton.visible = false;
+				PopUpManager.centerPopUp(this);
+				
+				var terms:String = (new TermsEmbed()).toString();
+				rtTerms.textFlow = TextConverter.importToFlow(terms, TextConverter.TEXT_FIELD_HTML_FORMAT);
+				rtTerms.addEventListener(ScrollEvent.SCROLL, scrollHandler);
+			}
+
+			private function scrollHandler(event:ScrollEvent):void
+			{
+				btnOk.enabled = true;	
+			}
+			
+			protected function closeHandler(event:CloseEvent):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+
+
+			protected function btnDisagree_clickHandler(event:MouseEvent):void
+			{
+				_agreed = false;
+				closeHandler(null);
+			}
+
+
+			protected function btnOk_clickHandler(event:MouseEvent):void
+			{
+				_agreed = true;
+				closeHandler(null);
+			}
+
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<s:RichText id="rtTerms" left="10" top="10" bottom="40" right="10" fontFamily="Verdana" fontSize="10"/>
+	<s:Button label="I Agree" right="10" bottom="10" id="btnOk" click="btnOk_clickHandler(event)"/>
+	<s:Button label="I Disagree" right="88" bottom="10" id="btnDisagree" click="btnDisagree_clickHandler(event)"/>
+</s:TitleWindow>

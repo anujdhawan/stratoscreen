@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="this_creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.resources.SwfHtml;
+			
+			import mx.events.FlexEvent;
+
+			private var _url:String;
+
+			public function get mediaUrl():String
+			{
+				return _url;
+			}
+
+			public function set mediaUrl(value:String):void
+			{
+				_url = value;
+				
+				if (web != null) {loadAndPlay();}
+			}
+
+			
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				if (_url != null) {loadAndPlay();}
+				
+			}
+
+			private function loadAndPlay():void
+			{
+				var html:String = (new SwfHtml()).toString();
+				
+				var pattern:RegExp = /@@SWF_URL@@/g;
+				html = html.replace(pattern, _url);
+				
+				web.htmlText = html;
+			}
+			
+			public function dispose():void
+			{
+				this.removeAllElements();
+			}
+			
+			protected function web_uncaughtScriptExceptionHandler(event:HTMLUncaughtScriptExceptionEvent):void
+			{
+				trace("");
+			}
+			
+			protected function web_completeHandler(event:Event):void
+			{
+				trace("");
+			}
+			
+		]]>
+	</fx:Script>
+	<mx:HTML id="web" width="100%" height="100%" borderVisible="false"
+			 complete="web_completeHandler(event)" contentBackgroundColor="#000000"
+			 uncaughtScriptException="web_uncaughtScriptExceptionHandler(event)"/>
+</s:Group>

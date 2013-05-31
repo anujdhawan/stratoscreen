@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				   xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="88"  styleName="PanelWarning"
+				   creationComplete="creationCompleteHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.SESEvent;
+			import com.stratoscreen.managers.AppManager;
+			
+			import mx.events.FlexEvent;
+
+			private var _appManager:AppManager;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+
+
+
+			protected function imgClose_clickHandler(event:MouseEvent):void
+			{
+				Object(this.parent).removeElement(this);
+			}
+
+
+			protected function lblResend_clickHandler(event:MouseEvent):void
+			{
+				_appManager.ses.verifyEmailAddress(_appManager.currentUser.email, verifyHandler);
+			}
+			
+			private function verifyHandler(event:SESEvent):void
+			{
+				Object(this.parent).removeElement(this);
+			}
+
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<mx:Image width="16" height="16" right="5" top="5" id="imgClose" source="@Embed('assets/icons/cross.png')" 
+			  creationComplete="{imgClose.alpha = .66}" mouseOver="{imgClose.alpha = 1}" mouseOut="{imgClose.alpha = .66}" 
+			  click="imgClose_clickHandler(event)"/>
+	<s:Label x="10" y="10" text="Verify Email" fontWeight="bold"/>
+	<s:RichText x="10" y="30" text="Your email has not been verified with Amazon web services. You will not be able to send emails to other uses on the system. Please respond to the email your inbox. " width="704" height="38"/>
+	<s:Label id="lblResend" x="10" y="63" text="Resend verfication" color="#0000FF" textDecoration="underline" 
+			 buttonMode="true" useHandCursor="true" click="lblResend_clickHandler(event)" />
+</s:BorderContainer>

@@ -1,0 +1,1571 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*"
+			   minWidth="950" minHeight="620" title="Edit Channel Overlay"  
+			   close="closeHandler(event)" creationComplete="creationCompleteHandler(event)" 
+			   addedToStage="this_addedToStageHandler(event)"  >
+	<fx:Declarations>
+		<mx:StringValidator id="validName" source="{txtOverlayName}" property="text" />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.components.GroupOverlayItem;
+			import com.roguedevelopment.objecthandles.Flex4ChildManager;
+			import com.roguedevelopment.objecthandles.Flex4HandleFactory;
+			import com.roguedevelopment.objecthandles.HandleClickedEvent;
+			import com.roguedevelopment.objecthandles.HandleDefinitions;
+			import com.roguedevelopment.objecthandles.ObjectChangedEvent;
+			import com.roguedevelopment.objecthandles.ObjectHandles;
+			import com.roguedevelopment.objecthandles.constraints.MaintainProportionConstraint;			
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.EffectsManager;
+			import com.stratoscreen.model.PlayTimes;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.*;			
+			import com.stratoscreen.model.views.*;
+			import com.stratoscreen.renderers.MediaThumbItem;
+			import com.stratoscreen.utils.DateUtils;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.utils.Utils;
+			
+			import flash.text.FontStyle;
+			
+			import flashx.textLayout.formats.TextDecoration;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.Alert;
+			import mx.core.DragSource;
+			import mx.core.IUIComponent;
+			import mx.core.UIComponent;
+			import mx.events.CloseEvent;
+			import mx.events.CollectionEvent;
+			import mx.events.CollectionEventKind;
+			import mx.events.ColorPickerEvent;
+			import mx.events.DataGridEvent;
+			import mx.events.DragEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ListEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.DragManager;
+			import mx.managers.PopUpManager;
+			import mx.utils.ColorUtil;
+			import mx.utils.StringUtil;
+			
+			import spark.events.IndexChangeEvent;
+			import spark.events.TextOperationEvent;
+						
+			[Bindable][Embed(source="/assets/icons/delete.png")]
+			private var iconDelete:Class;			
+			[Bindable][Embed(source="/assets/icons/image_edit.png")]
+			private var iconImageEdit:Class;
+			[Bindable][Embed(source="/assets/icons/shape_move_front.png")]
+			private var iconToFront:Class;
+			[Bindable][Embed(source="/assets/icons/shape_move_back.png")]
+			private var iconToBottom:Class;
+			[Bindable][Embed(source="/assets/icons/text_bold.png")]
+			private var iconBold:Class;
+			[Bindable][Embed(source="/assets/icons/text_italic.png")]
+			private var iconItalic:Class;
+			[Bindable][Embed(source="/assets/icons/text_underline.png")]
+			private var iconUnderline:Class;
+			
+			private const HEIGHT_PLAYTIMES:int = 48;
+			private const HEIGHT_PLAYTIMES_CUSTOM:int = 104;
+			private const HEIGHT_TIMES_FULL:int = 120;
+			private const HEIGHT_TIMES_SHRANK:int = 55;
+			private const SPACER_GAP:int = 6;
+			
+			[Bindable] private var _medias:ArrayCollection;
+			[Bindable] private var _groups:ArrayCollection
+			[Bindable] private var _overlay:Overlays;
+			[Bindable] private var _overlayDetail:ArrayCollection;
+			[Bindable] private var _isDirty:Boolean = false; 
+			[Bindable] private var _playTimes:ArrayCollection;		
+			private var _appManager:AppManager;
+			private var _point:Point;
+			private var _canceled:Boolean = true;	
+			private var _objectHandles:ObjectHandles;
+			private var _textDragging:Boolean;
+			private var _selectedItem:GroupOverlayItem;
+			private var _groupFormatHeight:int;	// Remember this for later
+			private var _imageUtils:ImageUtils;
+
+			public function get canceled():Boolean
+			{
+				return _canceled;
+			}
+			
+			public function set overlay(value:Overlays):void
+			{
+				// Do not copy the array when we clone the object. It will drop the actual field
+				_overlay = Utils.copyClassObject(Overlays, value, ["playTimesArray"]);
+				_playTimes = new ArrayCollection(_overlay.playTimesArray);
+				_playTimes.filterFunction = filterDeleted;
+				
+				// Assume the playtime are not blank
+				for each(var playTime:PlayTimes in _playTimes)
+				{
+					playTime.blankRow = false;					
+				}
+			}
+
+			public function get overlay():Overlays
+			{
+				return _overlay;
+			}
+			
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				
+				groupRight.visible = false;
+				borderThumb.visible = false;
+				borderItem.visible = false;
+				borderPositioning.visible = false;
+				borderEffects.visible = false;
+				_groupFormatHeight = borderTextFormat.height;
+				borderTextFormat.visible = false;
+				borderTextFormat.height = 0;				
+				borderTimes.visible = false;
+				
+				baseDuration.lblMinute.text = "";
+				baseDuration.lblSecond.text = ":";
+				baseDuration.stepMinute.toolTip = "Minutes";
+				baseDuration.stepSecond.toolTip = "Seconds";
+				durStart.lblMinute.text = "";
+				durStart.lblSecond.text = ":";
+				durStart.stepMinute.toolTip = "Minutes";
+				durStart.stepSecond.toolTip = "Seconds";
+				durEnd.lblMinute.text = "";
+				durEnd.lblSecond.text = ":";
+				durEnd.stepMinute.toolTip = "Minutes";
+				durEnd.stepSecond.toolTip = "Seconds";
+
+				_objectHandles = new ObjectHandles(canvas, null, new Flex4HandleFactory(),new Flex4ChildManager());
+				_objectHandles.addEventListener(HandleClickedEvent.HANDLE_CLICKED, objectClickHandler);
+				_objectHandles.addEventListener(ObjectChangedEvent.OBJECT_MOVED, objectMoveHandler);
+				_objectHandles.addEventListener(ObjectChangedEvent.OBJECT_RESIZED, objectResizedHandler);
+				_objectHandles.addEventListener(ObjectChangedEvent.OBJECT_ROTATED, objectRotatedHandler);
+				
+				_appManager = this.parentApplication.appManager;
+				_appManager.currentEditWindow = this;
+				_imageUtils = new ImageUtils(Constants.VIEW_LETTERBOX);	// Keep aspect when editing the overlay
+								
+				durStart.addEventListener(Duration.DURATION_CHANGE, durationChangeHandler);
+				durEnd.addEventListener(Duration.DURATION_CHANGE, durationChangeHandler);
+
+				this.addEventListener(MouseEvent.MOUSE_MOVE, mouseMoveListener);
+				btnSort.addEventListener(TextSortButton.CLICKED, sortButtonHandler);
+				selectMediaTypes.addEventListener(SelectMediaTypes.SELECTION_CHANGE, typeSelectHandler);
+
+				listMedia.scroller.setStyle("horizontalScrollPolicy", "off");
+				
+				// Set up the SelectedMediaTypes. We do not allow video
+				selectMediaTypes.videoSelected = false;
+				selectMediaTypes.videoEnabled = false;
+
+				// Watch for items being dropped on the work canvase
+				canvas.addEventListener(DragEvent.DRAG_ENTER, dragEnterHandler);
+				canvas.addEventListener(DragEvent.DRAG_DROP, dragDropHandler);				
+				
+				// Watch for search changes. Remember we have two
+				searchBox.addEventListener(SearchBox.SEARCH_SEARCH, searchHandler);
+				searchBox.addEventListener(SearchBox.SEARCH_CLEARED, searchClearHandler);
+								
+				if (_overlay == null)
+				{
+					_overlay = new Overlays();			
+					_overlay.type = Overlays.TYPE_CHANNEL;
+					_overlay.accountId = _appManager.currentAccount.itemName;
+					_overlay.createdBy = _appManager.currentUser.itemName;
+					_overlay.duration = "60";	// Defaul to one minute
+					
+					// Guess the size of the overlays based on the default screen
+					if (_appManager.currentAccount.defaultScreenView == Constants.VIEW_FULL)
+					{
+						// Maybe a 4:3
+						_overlay.width = "720";
+						_overlay.height = "480";
+					}
+					else
+					{
+						// probably 16:9. Hopefully HI DEF
+						_overlay.width = "1920";
+						_overlay.height = "1080";						
+					}
+					
+					_overlayDetail = new ArrayCollection();
+					_overlayDetail.filterFunction = filterDeleted;
+					_overlayDetail.addEventListener(CollectionEvent.COLLECTION_CHANGE, detailChangeHandler);
+
+					_playTimes = new ArrayCollection(_overlay.playTimesArray);
+					_playTimes.filterFunction = filterDeleted;
+
+					_isDirty = true;
+					
+					baseDuration.duration = 60;	// Defaul to one minute
+				}
+				else
+				{
+					// Load the data so we can edit the overlay
+					this.enabled = false;
+					var sql:String = "Select * from OverlayDetail where overlayId = '" + _overlay.itemName + "'";
+					_appManager.sdb.select(sql, loadOverlayDetailHandler, OverlayDetail);
+				}
+				canvasSize_changeHandler(null);
+				baseDuration.duration = parseInt(_overlay.duration);
+
+				// Set up the Play Times box
+				if (_playTimes.length == 0)	
+				{
+					chkPlayTimes.selected = true;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES;
+					gridTimes.visible = false;
+				}
+				else
+				{
+					chkPlayTimes.selected = false;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES_CUSTOM;
+					gridTimes.visible = true;
+					
+				}			
+				addBlankRow();				
+
+				
+				// Check to see if we have loaded the media yest
+				if (_appManager.medias == null)
+				{
+					this.enabled = false;
+					sql = "Select * from Medias where accountId='";
+					sql += _appManager.currentUser.accountId + "'";						
+					_appManager.sdb.select(sql, mediaLoadHandler, Medias);
+				}
+				else
+				{
+					this.callLater(setMediasArray);	
+				}			
+			}
+			
+			protected function this_addedToStageHandler(event:Event):void
+			{
+				this.stage.addEventListener(KeyboardEvent.KEY_DOWN, stageKeyDownHandler);
+			}
+
+			private function stageKeyDownHandler(event:KeyboardEvent):void
+			{
+				if (btnDelete == null) {return;}
+				
+				switch (event.keyCode)
+				{
+					case Keyboard.DELETE:
+						// Will delete even if the Text fields are selected
+						//if (btnDelete.visible) {btnDelete_clickHandler(null);}						
+						break;
+				}
+			}
+				
+			private function mediaLoadHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				if (!event.success)
+				{
+					Alert.show("Could not load media. Please try again later", "Load Error");
+					_canceled = true;
+					closeHandler(null);
+					return;
+				}
+				
+				_appManager.medias = event.result as Array;
+				setMediasArray()
+			}
+			
+			
+			private function loadOverlayDetailHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not load base media. Please try again later", "Load Error");
+					this.enabled = true;
+					return;
+				}
+
+				_overlayDetail = new ArrayCollection();
+				_overlayDetail.filterFunction = filterDeleted;
+				_overlayDetail.addEventListener(CollectionEvent.COLLECTION_CHANGE, detailChangeHandler);
+				_overlayDetail.source = event.result as Array;
+				
+				// Sort the detail by zorder
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("z")];
+				_overlayDetail.sort = sort;
+				_overlayDetail.refresh();				
+
+				// Get all the Medias used in the Overlay. We should have at least one for the base
+				var sql:String = "Select * from Medias where itemName() in (";
+				var first:Boolean = true;
+				for each (var detail:OverlayDetail in _overlayDetail)
+				{
+					if (detail.type == OverlayDetail.TYPE_BASE || detail.type == OverlayDetail.TYPE_MEDIA)
+					{
+						if (!first) {sql += ",";}
+						sql += "'" + detail.mediaId + "'";
+						first = false;	
+					}
+				}
+				sql += ")"
+				
+				_appManager.sdb.select(sql, queryMediasHandler, Medias); 				
+			}
+			
+			private function queryMediasHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not list media detail. Please try again later", "Load Error");
+					return;
+				}
+
+				// Match up the Medias with the detail
+				var result:Array = event.result as Array;
+				for each (var detail:OverlayDetail in _overlayDetail)
+				{
+					for (var i:int = 0; i < result.length; i++)
+					{
+						if (detail.mediaId == result[i].itemName)
+						{
+							detail.media = result[i];
+							break;
+						}
+					}
+				}
+				
+				// Add the items to the canvase
+				for each (detail in _overlayDetail)
+				{				
+					addItemToCanvas(detail);
+				}
+				
+				this.enabled = true;
+				borderItem.visible = false;
+				borderPositioning.visible = false;
+				borderEffects.visible = false;
+				borderTextFormat.visible = false;
+				spacerTextFormat.height = 0;
+				borderTimes.visible = false;
+				_objectHandles.selectionManager.clearSelection();
+			}
+			
+			private function setMediasArray():void
+			{
+				_medias = new ArrayCollection();
+				_medias.source = _appManager.medias;
+				_medias.filterFunction = filterMedia;
+				
+				// Default to an alphabetic sort
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name")];
+				_medias.sort = sort;
+				_medias.refresh();				
+			}
+			
+			protected function closeHandler(event:Event):void
+			{
+				var closeWindow:Boolean;
+				
+				if (event == null)
+				{
+					// This was called directly from the program
+					closeWindow = true;
+					
+					// Broadcast a new event. The parent will be listening
+					if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE, false, false, Alert.YES));}
+				}
+				else  
+				{
+					switch (CloseEvent(event).detail)
+					{
+						case Alert.NO:
+							closeWindow = false;
+							break;
+						
+						case Alert.YES:
+							closeWindow = true;
+							break;
+						
+						default:
+							closeWindow = !_isDirty
+							if (_isDirty) {Alert.show("Do you want to close window?", "Close Window", Alert.YES | Alert.NO, null, closeHandler, null, Alert.NO);}
+					}
+				}
+				
+				if (closeWindow) {PopUpManager.removePopUp(this);}				
+			}
+			
+			private function searchClearHandler(event:Event):void
+			{
+				// Reset the filter too
+				btnFilter.selected = false;
+				selectMediaTypes.reset();
+				searchHandler(null);
+			}
+			
+			private function searchHandler(event:Event):void
+			{
+				_medias.refresh();
+			}
+			
+			private function filterMedia(item:Object):Boolean
+			{
+				if (item.deleted) {return false;}
+				if (item is Medias)
+				{
+					if (!item.uploaded) {return false;} // Cannot work with files until they are uploaded
+					if (item.acceleratedBool) {return false;}	// Accelerated SWFs cannot be on top
+				}
+				
+				// Check the Filter types
+				if (item is Medias)
+				{
+					switch (item.mediaType)
+					{
+						case Constants.MEDIA_TYPE_AUDIO:
+							if (!selectMediaTypes.audioSelected) {return false;}
+							break;
+						
+						case Constants.MEDIA_TYPE_IMAGE:
+							if (!selectMediaTypes.imagesSelected) {return false;}
+							break;
+						
+						case Constants.MEDIA_TYPE_SWF:
+							if (!selectMediaTypes.swfsSelected) {return false;}
+							break;
+						
+						case Constants.MEDIA_TYPE_VIDEO:
+							if (!selectMediaTypes.videoSelected) {return false;}
+							break;
+					}
+				}
+				
+				var mediaName:String = item.name.toLowerCase();
+				var searchText:String = searchBox.txtSearch.text.toLowerCase();
+				searchText = StringUtil.trim(searchText);
+				
+				return mediaName.indexOf(searchText) >= 0;
+			}
+			
+			private function mouseMoveListener(event:MouseEvent):void
+			{
+				_point = new Point(event.stageX , event.stageY);	// Fix hard coding
+			}
+			
+			private function dragBeginHandler(event:MouseEvent):void
+			{
+				var dragInitiator:IUIComponent = event.currentTarget as IUIComponent;
+				var dragSource:DragSource = new DragSource();
+				DragManager.doDrag( dragInitiator, dragSource, event, null );
+				_textDragging = true;
+			}
+			
+			private function dragEnterHandler(event:DragEvent):void
+			{
+				// The user may not have dragging the correct item.
+				// Dragged thumbnails can cause the issue
+				if (!(listMedia.selectedItem is Medias) && !_textDragging) {return;}				
+				var target:IUIComponent = event.currentTarget as IUIComponent;
+				
+				DragManager.acceptDragDrop( target );
+				_textDragging = false;
+			}
+
+			private function dragDropHandler(event:DragEvent):void
+			{				
+				var dragItem:UIComponent = event.dragInitiator as UIComponent;
+				
+				var detail:OverlayDetail;
+				if (dragItem is List) 
+				{
+					detail = new OverlayDetail(_overlay.itemName, OverlayDetail.TYPE_MEDIA);
+					detail.media = listMedia.selectedItem as Medias;
+					detail.height = detail.media.height;
+					detail.width = detail.media.width;	
+					detail.mimeType = detail.media.mimeType;
+				}
+				else
+				{
+					detail = new OverlayDetail(_overlay.itemName, OverlayDetail.TYPE_TEXT);
+					detail.media = listMedia.selectedItem as Medias;
+					detail.height = OverlayDetail.DEFAULT_TEXT_HEIGHT.toString();
+					detail.width = OverlayDetail.DEFAULT_TEXT_WIDTH.toString();		
+					detail.text = OverlayDetail.DEFAULT_TEXT_TEXT;
+					detail.color = OverlayDetail.DEFAULT_TEXT_COLOR;
+					detail.fontFamily = OverlayDetail.DEFAULT_TEXT_FONT;
+					detail.fontSize = OverlayDetail.DEFAULT_TEXT_SIZE;
+					detail.fontStyle = OverlayDetail.DEFAULT_TEXT_STYLE;
+					detail.fontWeight =  OverlayDetail.DEFAULT_TEXT_WEIGHT;
+					detail.textDecoration = OverlayDetail.DEFAULT_TEXT_DECOR;						
+				}
+				
+				detail.x = (canvas.contentMouseX - parseFloat(detail.width) / 2).toString();
+				detail.y = (canvas.contentMouseY - parseFloat(detail.height) / 2).toString();
+				detail.z = _overlayDetail.length.toString();
+				detail.accountId = _appManager.currentAccount.itemName;
+				
+				_overlayDetail.addItem(detail);			
+				addItemToCanvas(detail);
+				
+				// Update the right side too
+				ddItems.selectedIndex = _overlayDetail.length - 1;
+				ddItems_changeHandler(null);
+				_isDirty = true;
+			}
+			
+			private function addItemToCanvas(detail:OverlayDetail):void
+			{
+				var overlayItem:GroupOverlayItem = new GroupOverlayItem();		
+				overlayItem.addEventListener(GroupOverlayItem.ASPECT_CHANGE, overlayAspectChange);
+				overlayItem.overlayDetail = detail;
+				overlayItem.width = parseFloat(detail.width);
+				overlayItem.height = parseFloat(detail.height);				
+				overlayItem.x = parseFloat(detail.x);
+				overlayItem.y = parseFloat(detail.y);
+				overlayItem.rotation = parseFloat(detail.rotate);
+				overlayItem.alpha = parseFloat(detail.alpha);
+				overlayItem.addEventListener(GroupOverlayItem.ITEM_CLICK, overlayItemClickHandler);
+				canvas.addElement(overlayItem);
+								
+				var constraints:Array = detail.type == OverlayDetail.TYPE_TEXT ? null : [new MaintainProportionConstraint()]
+
+				_objectHandles.registerComponent(overlayItem, overlayItem, HandleDefinitions.DEFAULT_PLUS_MOVE_DEFINITION, 
+					                             true,constraints );
+				_objectHandles.selectionManager.setSelected(overlayItem);
+			}
+
+			protected function ddZoom_changeHandler(event:IndexChangeEvent):void
+			{
+				scaleCanvas();
+			}
+			
+			private function scaleCanvas():void
+			{				
+				// Size as needed
+				if (ddZoom.selectedItem.value == 0)
+				{
+					var rect:ResizeRectangle = _imageUtils.getBestFit(parseFloat(txtCanvasWidth.text), parseFloat(txtCanvasHeight.text), 
+						                                              groupContainer.width, groupContainer.height, false);
+					canvas.scaleX = rect.scaleX;
+					canvas.scaleY = rect.scaleY;
+				}
+				else
+				{
+					canvas.scaleX = ddZoom.selectedItem.value;
+					canvas.scaleY = ddZoom.selectedItem.value;					
+				}	
+
+				if (canvas.width * canvas.scaleX > groupContainer.width)
+				{
+					canvas.x = 0;
+				}
+				else
+				{
+					canvas.x = (groupContainer.width - canvas.width * canvas.scaleX) / 2;
+				}
+
+				if (canvas.height * canvas.scaleY > groupContainer.height)
+				{
+					canvas.y = 0;
+				}
+				else
+				{
+					canvas.y = (groupContainer.height - canvas.height * canvas.scaleY) / 2;
+				}
+			}
+
+			private function getItemLabel(item:Object):String
+			{
+				var detail:OverlayDetail = item as OverlayDetail;
+				var label:String = "";
+				
+				switch (detail.type)
+				{
+					case OverlayDetail.TYPE_BASE:
+						label = "Base";
+						break;
+
+					case OverlayDetail.TYPE_TEXT:
+						label = "Text";
+						break;
+
+					case OverlayDetail.TYPE_MEDIA:
+						label = detail.media.name;
+						break;
+				}
+				
+				if (label.length > 20) {label = label.substr(0, 17) + "...";}
+				return label;
+			}
+
+			protected function ddItems_changeHandler(event:IndexChangeEvent):void
+			{
+				var detail:OverlayDetail = ddItems.selectedItem as OverlayDetail;
+				
+				txtX.text = detail.x;
+				txtY.text = detail.y;
+				txtWidth.text = detail.width;
+				txtHeight.text = detail.height;
+				slideAlpha.value = parseFloat(detail.alpha);
+				stepRotate.value = parseFloat(detail.rotate);
+												
+				if (detail.type == OverlayDetail.TYPE_BASE)
+				{
+					_objectHandles.selectionManager.clearSelection();
+					
+					borderTimes.visible = false;
+					borderTimes.height = 0;
+					spacerTimes.height = 0;
+				}
+				else
+				{
+					// Find the object and turn the handles on
+					for (var i:int = 0; i < canvas.numElements; i++)
+					{
+						if (canvas.getElementAt(i) is GroupOverlayItem)
+						{
+							var item:GroupOverlayItem = canvas.getElementAt(i) as GroupOverlayItem;
+							if (item.overlayDetail.itemName == detail.itemName)
+							{
+								_selectedItem = item;
+								_objectHandles.selectionManager.setSelected(item);
+								break;
+							}
+						}
+					}
+
+					durStart.duration = parseInt(detail.startTime);
+					durEnd.duration = parseInt(detail.endTime);
+					//	slideAlpha.enabled = detail.media.mediaType == Constants.MEDIA_TYPE_IMAGE || detail.media.mediaType == Constants.MEDIA_TYPE_SWF;
+					//	stepRotate.enabled = detail.media.mediaType == Constants.MEDIA_TYPE_IMAGE || detail.media.mediaType == Constants.MEDIA_TYPE_SWF;
+					chkStartToEnd.selected = detail.startTime == "0" && detail.endTime == "0";					
+					
+					borderTimes.visible = true;
+					borderTimes.height = chkStartToEnd.selected ? HEIGHT_TIMES_SHRANK : HEIGHT_TIMES_FULL;
+					spacerTimes.height = SPACER_GAP;
+				}
+				
+				// If this is a text field, match the controls to the item
+				if (detail.type == OverlayDetail.TYPE_TEXT)
+				{
+					ddFont.selectedIndex = 0;
+					for (i = 0; i < ddFont.dataProvider.length; i++)
+					{
+						if ( ddFont.dataProvider[i].value == detail.fontFamily)
+						{
+							ddFont.selectedIndex = i;
+							break;
+						}
+					}
+
+					toggleBold.selected = detail.fontWeight == FontStyle.BOLD;
+					toggleItalic.selected = detail.fontStyle == FontStyle.ITALIC;
+					toggleUnderline.selected = detail.textDecoration == TextDecoration.UNDERLINE;
+
+					ddSize.textInput.text = detail.fontSize;
+					colorPick.selectedColor = uint("0x" + detail.color);
+					borderTextFormat.visible = true;
+					borderTextFormat.height = _groupFormatHeight;
+					spacerTextFormat.height = SPACER_GAP;
+				}
+				else
+				{
+					borderTextFormat.visible = false;
+					borderTextFormat.height = 0;	
+					spacerTextFormat.height = 0;					
+				}
+				
+				for (i = 0; i < ddEffect.dataProvider.length; i++)
+				{
+					if (ddEffect.dataProvider[i].value == detail.effectId)
+					{
+						ddEffect.selectedIndex = i;
+						break;
+					}
+				}
+				
+				borderItem.visible = true;
+				borderPositioning.visible = true;
+				borderEffects.visible = true;
+				borderEffects.enabled = detail.media == null || detail.media.mediaType != Constants.MEDIA_TYPE_AUDIO;
+				groupRight.visible = true;
+			}
+
+
+			protected function btnDelete_clickHandler(event:MouseEvent):void
+			{
+				_isDirty = true;
+				
+				// Remove the item from the canvas and mark the data as deleted
+				var detail:OverlayDetail = ddItems.selectedItem as OverlayDetail;
+				if (detail == null) {return;}	// Hmmm. May be a bigger issue
+				
+				detail.deleted = true;
+				
+				// Find the object so it can be removed
+				for (var i:int = 0; i < canvas.numElements; i++)
+				{
+					if (canvas.getElementAt(i) is GroupOverlayItem)
+					{
+						var item:GroupOverlayItem = canvas.getElementAt(i) as GroupOverlayItem;
+						if (item.overlayDetail.itemName == detail.itemName)
+						{
+							canvas.removeElementAt(i);
+							_objectHandles.unregisterModel(item);
+							break;
+						}
+					}
+				}
+				
+				_overlayDetail.refresh();
+				borderItem.visible = false;
+				borderPositioning.visible = false;
+				borderEffects.visible = false;
+				borderTextFormat.visible = false;
+				spacerTextFormat.height = 0;
+				borderTimes.visible = false;
+				_objectHandles.selectionManager.clearSelection();				
+			}
+
+			protected function overlayItemClickHandler(event:Event):void
+			{
+				if (event.target is GroupOverlayItem)
+				{
+					ddItems.selectedItem = event.target.overlayDetail;
+					ddItems_changeHandler(null);
+				}
+			}
+
+			private function objectClickHandler(event:Event):void
+			{
+				trace("");
+			}
+			
+			private function objectMoveHandler(event:ObjectChangedEvent):void
+			{
+				_isDirty = true;
+				
+				var item:GroupOverlayItem = event.relatedObjects[0];				
+				item.overlayDetail.x = item.x.toFixed(2);
+				item.overlayDetail.y = item.y.toFixed(2);
+				txtX.text = item.overlayDetail.x;
+				txtY.text = item.overlayDetail.y;
+			}
+
+			private function objectResizedHandler(event:ObjectChangedEvent):void
+			{
+				_isDirty = true;
+				
+				var item:GroupOverlayItem = event.relatedObjects[0];				
+				item.overlayDetail.width = item.width.toFixed(2);
+				item.overlayDetail.height = item.height.toFixed(2);
+				txtWidth.text = item.overlayDetail.width;
+				txtHeight.text = item.overlayDetail.height;				
+			}
+
+			private function objectRotatedHandler(event:ObjectChangedEvent):void
+			{
+				_isDirty = true;
+				
+				var item:GroupOverlayItem = event.relatedObjects[0];				
+				item.overlayDetail.rotate = item.rotation.toFixed(2);
+				stepRotate.value = parseFloat(item.overlayDetail.rotate);			
+			}
+
+
+			protected function stepRotate_changeHandler(event:Event):void
+			{
+				_selectedItem.rotation = stepRotate.value;
+				_selectedItem.overlayDetail.rotate = _selectedItem.rotation.toString();
+				_objectHandles.selectionManager.setSelected(_selectedItem);
+				_isDirty = true;
+			}
+			
+			private function itemChangeHandler(event:Event):void
+			{
+				_selectedItem.x = parseFloat(txtX.text);
+				_selectedItem.y = parseFloat(txtY.text);
+				_selectedItem.width = parseFloat(txtWidth.text);
+				_selectedItem.height = parseFloat(txtHeight.text);
+				_selectedItem.overlayDetail.x = txtX.text;
+				_selectedItem.overlayDetail.y = txtY.text;
+				_selectedItem.overlayDetail.width = txtWidth.text;
+				_selectedItem.overlayDetail.height = txtHeight.text;
+				
+				_objectHandles.selectionManager.setSelected(_selectedItem);				
+			}
+
+			protected function zorderHandler(event:MouseEvent, toFront:Boolean):void
+			{
+				_objectHandles.unregisterComponent(_selectedItem);
+				canvas.removeElement(_selectedItem);
+				if (toFront)
+				{
+					canvas.addElement(_selectedItem);						
+				}
+				else
+				{
+					canvas.addElementAt(_selectedItem, 0);	
+				}
+				
+				// Make sure the background thumbnail is always on bottom
+				if (!toFront)
+				{
+					canvas.removeElement(rectBackground);
+					canvas.addElementAt(rectBackground, 0);
+				}				
+				
+				_objectHandles.registerComponent(_selectedItem, _selectedItem, HandleDefinitions.DEFAULT_PLUS_MOVE_DEFINITION);
+				_objectHandles.selectionManager.setSelected(_selectedItem);
+				_isDirty = true;
+				
+				// Also adjust the overlaydetail too
+				// Rearrang but keep in order
+				for (var i:int = 0; i < _overlayDetail.length; i++)
+				{
+					if ( _overlayDetail[i].itemName == _selectedItem.overlayDetail.itemName)
+					{
+						// Push the selectitem to the front 
+						if (toFront)
+						{
+							_selectedItem.overlayDetail.z = "99999";	
+						}						
+					}
+					else
+					{
+						if ( _overlayDetail[i].type != OverlayDetail.TYPE_BASE)
+						{
+							_overlayDetail[i].z += parseInt(_overlayDetail[i].z) +  5000;
+						}
+					}
+				}
+				
+				// Resequence again but with a better zindex
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("zInt")];
+				_overlayDetail.sort = sort;
+				_overlayDetail.refresh();				
+				
+				i = 0;
+				for each(var detail:OverlayDetail in _overlayDetail)
+				{
+					if ( detail.type != OverlayDetail.TYPE_BASE)
+					{
+						i++;
+						detail.z = i.toString();		
+					}
+				}
+			}
+
+			protected function slideAlpha_changeHandler(event:Event):void
+			{
+				_objectHandles.selectionManager.clearSelection();
+				_selectedItem.alpha = slideAlpha.value;
+				_selectedItem.overlayDetail.alpha = _selectedItem.alpha.toFixed(1);
+				_objectHandles.selectionManager.setSelected(_selectedItem);
+				_isDirty = true;
+			}
+
+			protected function ddFont_changeHandler(event:IndexChangeEvent):void
+			{
+				_selectedItem.overlayDetail.fontFamily = ddFont.selectedItem.value;
+				_selectedItem.setTextProperties();
+				_objectHandles.selectionManager.setSelected(_selectedItem);	
+				_isDirty = true;
+			}
+
+			protected function ddSize_changeHandler(event:IndexChangeEvent):void
+			{
+				var size:String;
+				var item:Object = ddSize.selectedItem;				
+				if (item is String)
+				{
+					size = item.toString();	// Assume the user entered a new value
+				}
+				else
+				{
+					size = item.value;
+				}
+				
+				_selectedItem.overlayDetail.fontSize = size;
+				_selectedItem.setTextProperties();
+				_objectHandles.selectionManager.setSelected(_selectedItem);	
+				_isDirty = true;
+			}
+
+			protected function colorPick_changeHandler(event:ColorPickerEvent):void
+			{
+				var hex:String = colorPick.selectedColor.toString(16);
+				if (hex.length < 6)
+				{
+					hex = "000000".substr(0, 6 - hex.length) + hex; 
+				}
+				
+				_selectedItem.overlayDetail.color = hex;
+				_selectedItem.setTextProperties();
+				_objectHandles.selectionManager.setSelected(_selectedItem);		
+				_isDirty = true;
+			}
+
+			protected function bold_clickHandler(event:MouseEvent):void
+			{
+				var isBold:Boolean = _selectedItem.overlayDetail.fontWeight == FontStyle.BOLD;
+				_selectedItem.overlayDetail.fontWeight = isBold ? "normal" : FontStyle.BOLD;
+				_selectedItem.setTextProperties();
+				_objectHandles.selectionManager.setSelected(_selectedItem);	
+				toggleBold.selected = !toggleBold.selected;
+				_isDirty = true;
+			}
+
+			protected function italic_clickHandler(event:MouseEvent):void
+			{
+				var isItalic:Boolean = _selectedItem.overlayDetail.fontStyle == FontStyle.ITALIC;
+				_selectedItem.overlayDetail.fontStyle = isItalic ? "normal" : FontStyle.ITALIC;
+				_selectedItem.setTextProperties();
+				_objectHandles.selectionManager.setSelected(_selectedItem);		
+				toggleItalic.selected = !toggleItalic.selected;
+				_isDirty = true;
+			}
+
+			protected function underline_clickHandler(event:MouseEvent):void
+			{
+				var isUnderline:Boolean = _selectedItem.overlayDetail.textDecoration == TextDecoration.UNDERLINE;
+				_selectedItem.overlayDetail.textDecoration = isUnderline ? TextDecoration.NONE : TextDecoration.UNDERLINE;
+				_selectedItem.setTextProperties();
+				_objectHandles.selectionManager.setSelected(_selectedItem);	
+				toggleUnderline.selected = !toggleUnderline.selected;
+				_isDirty = true;
+			}
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				gridTimes.errorString = "";
+				
+				var result:ValidationResultEvent = validName.validate();
+				if (result.results != null)  
+				{
+					// Show the Alert. It is kinda hard to read
+					Alert.show(result.message, "Invalid Overlay Name");
+					return;
+				}
+				
+				// Make sure we have at least one item
+				if (_overlayDetail.length == 0)
+				{
+					Alert.show("At least one item must be added to the overlay.", "Invalid Overlay");
+					return;					
+				}
+				
+				// Validate the times
+				for each (var playTime:PlayTimes in _playTimes)
+				{
+					if ( StringUtil.trim(playTime.startTime) == "" && StringUtil.trim(playTime.endTime) == "")
+					{
+						// This is OK
+					}
+					else if ( StringUtil.trim(playTime.startTime) == "" || StringUtil.trim(playTime.endTime) == "")
+					{
+						// Adjust the time. Assume blank that it is the beginning
+						if (StringUtil.trim(playTime.startTime) == "") {playTime.startTime = "00:00:00";}	
+						if (StringUtil.trim(playTime.endTime) == "") {playTime.endTime = "23:59:59";}
+					}
+					else
+					{
+						// Validate what we have
+						if (!DateUtils.isTime(playTime.startTime) || !DateUtils.isTime(playTime.endTime))
+						{
+							gridTimes.errorString = "Invalid Time";
+							Alert.show("Invalid time found", "Invalid Time");
+							return;
+						}
+						
+						if (!playTime.datesInSequence())
+						{
+							Alert.show("Invalid time time range", "Invalid Time");
+							return;									
+						}
+					}				
+				}
+				
+				_canceled = false;
+				this.enabled = false;
+
+				_overlay.name = StringUtil.trim(txtOverlayName.text);
+				_overlay.duration = baseDuration.duration.toString();
+				_overlay.playTimesArray = _playTimes.source;
+				_overlay.modifiedDate = new Date();
+				_overlay.modifiedBy = _appManager.currentUser.itemName;
+				_overlay.updated = true;
+				formatDetail();
+
+				// Save the detail first. Just in case this fails
+				_appManager.sdb.updateDomain(_overlayDetail.source, updateOverlayDetailHandler);
+			}
+			
+			private function formatDetail():void
+			{
+				for (var i:int = 0; i < _overlayDetail.length; i++)
+				{
+					var detail:OverlayDetail = _overlayDetail[i];
+					detail.updated = detail.deleted ? false : true;	// Cannot have updated and deleted together
+					detail.modifiedDate = new Date();
+					detail.modifiedBy = _appManager.currentUser.itemName;
+					detail.z = i.toString();
+					
+					// There is a mediaId bug, watch for if
+					if (detail.type == OverlayDetail.TYPE_TEXT) {detail.mediaId = "";}
+					
+					// Keep the number to two decimals
+					detail.x = fixDecimals(detail.x);
+					detail.y = fixDecimals(detail.y);
+					detail.width = fixDecimals(detail.width);
+					detail.height = fixDecimals(detail.height);
+					detail.alpha = fixDecimals(detail.alpha);
+					detail.rotate = fixDecimals(detail.rotate);			
+					
+					// If the user cleared the start and times update the row too
+					if (detail.playAlways)
+					{
+						detail.startTime = "0";
+						detail.endTime = "0";
+						detail.startFrame = "0";
+						detail.endFrame = "0";	
+					}
+				}
+			}
+			
+			private function fixDecimals(value:String, decimals:int = 2):String
+			{
+				var float:Number = parseFloat(value);
+				return float.toFixed(decimals);
+			}
+
+			private function updateOverlayDetailHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					this.enabled = true;
+					Alert.show("Could not save Overlay Detail. Please try again later.\r\n" +
+						       "This error can be caused by unacceptable characters in the Text field.", "Update Error");
+					return;
+				}
+			
+				// Save the headers next
+				_overlay.updated = true;
+				_overlay.modifiedBy = _appManager.currentUser.itemName;
+				_overlay.modifiedDate = new Date();				
+				_appManager.sdb.updateDomain([_overlay], updateOverlayHandler);
+			}
+
+			private function updateOverlayHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					this.enabled = true;
+					Alert.show("Could not save Overlay. Please try again later.", "Update Error");
+					return;
+				}
+				
+				closeHandler(null);
+			}
+			
+
+			protected function canvasSize_changeHandler(event:Event):void
+			{
+				canvas.width = parseFloat(txtCanvasWidth.text);
+				canvas.height = parseFloat(txtCanvasHeight.text);
+				scaleCanvas();
+				if (event != null) {_isDirty = true;}
+			}
+
+			public function showImage(value:Object):void
+			{
+				var bmpData:BitmapData = value.thumbBmpdata;
+				if (bmpData == null) {return;}
+				if (_point == null) {return;}	// hmmm. WOnder why this happened
+				
+				
+				// If the image is bigger than the zie alloted then skip the magnified view
+				if (bmpData.height <= 18 && bmpData.width <=30)	// Fix hard code
+				{
+					return;
+				}
+				
+				var rect:ResizeRectangle = ImageUtils.reSizetoMax(bmpData.width, bmpData.height);
+				imgThumb.source = new Bitmap(bmpData);
+				imgThumb.width = rect.width;
+				imgThumb.height = rect.height;
+				borderThumb.x = _point.x;
+				borderThumb.y = _point.y;
+				borderThumb.visible = true;
+				
+				// We have to guess what side is being moused over. 
+				// We want the images to the left of the grid if on the right
+				borderThumb.y -= 60;	// Fix the hard code
+				if (borderThumb.x < groupLeft.width)
+				{
+					borderThumb.x = 50; 	// Fix hardcoding
+				}
+				else
+				{
+					borderThumb.x = groupRight.x -  rect.width;
+				}
+				
+			}
+			
+			public function hideImage():void
+			{
+				borderThumb.visible = false;
+			}
+			
+			private function filterDeleted(item:Object):Boolean
+			{
+				return !item.deleted;
+			}
+			
+			private function detailChangeHandler(event:CollectionEvent):void
+			{
+				borderItem.visible = _overlayDetail.length > 0;
+				borderPositioning.visible = borderItem.visible;		
+				borderEffects.visible =  borderItem.visible;	
+			}		
+			
+			protected function chkPlayTimes_clickHandler(event:MouseEvent):void
+			{
+				if (chkPlayTimes.selected)
+				{
+					gridTimes.visible = false;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES;
+				}
+				else
+				{
+					gridTimes.visible = true;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES_CUSTOM;					
+				}			
+			}
+			
+			protected function gridTimes_itemClickHandler(event:ListEvent):void
+			{
+				gridTimes.errorString = "";						
+				
+				// The update or delete was clicked
+				if (event.columnIndex == 2)
+				{
+					var playTime:PlayTimes = event.itemRenderer.data as PlayTimes;
+					
+					if (!playTime.blankRow)
+					{
+						_isDirty = true;
+						playTime.deleted = true;
+						_playTimes.refresh();
+					}					
+				}
+				
+				// Make sure we have a row we an edit
+				addBlankRow();
+			}
+			
+			protected function gridTimes_itemEditEndHandler(event:DataGridEvent):void
+			{				
+				_isDirty = true;
+				event.itemRenderer.data.blankRow = false;
+				addBlankRow();
+			}
+			
+			private function addBlankRow():void
+			{
+				// We may need to add a new row to the collection.
+				var blankRowFound:Boolean = false;
+				for each(var playTime:PlayTimes in _playTimes)
+				{
+					if ( StringUtil.trim(playTime.startTime) == "" && StringUtil.trim(playTime.endTime) == "")
+					{
+						playTime.blankRow = true;
+						blankRowFound = true;
+						break;
+					}
+				}
+				
+				if (!blankRowFound) {_playTimes.addItemAt(new PlayTimes(), _playTimes.length );}
+			}
+			
+			private function sortButtonHandler(event:Event):void
+			{
+				if (_medias == null) {return;}
+				
+				// Default to an alphabetic sort
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name", true, btnSort.selected)];
+
+				_medias.sort = sort;
+				_medias.refresh()
+					
+				_groups.sort = sort;
+				_groups.refresh();
+			}
+			
+			public function addItem(media:Medias):void
+			{
+				// The user clicked the "Plus". Just add the 
+				// item at the top
+				var detail:OverlayDetail = new OverlayDetail(_overlay.itemName, OverlayDetail.TYPE_MEDIA);
+				detail.media = media;
+				detail.height = media.height;
+				detail.width = media.width;	
+				detail.mimeType = media.mimeType;
+				detail.effectId = _appManager.currentAccount.defaultEffectId;
+				
+				// Try and stagger
+				var overlayCount:int = _overlayDetail.length;
+				detail.x = (overlayCount * 10).toString();
+				detail.y = (overlayCount * 10).toString();
+				detail.z = _overlayDetail.length.toString();
+				detail.accountId = _appManager.currentAccount.itemName;
+				detail.effectId = _appManager.currentAccount.defaultEffectId;
+				
+				_overlayDetail.addItem(detail);			
+				addItemToCanvas(detail);
+				
+				// Update the right side too
+				ddItems.selectedIndex = _overlayDetail.length - 1;
+				ddItems_changeHandler(null);
+				_isDirty = true;				
+			}
+
+			protected function canvas_clickHandler(event:MouseEvent):void
+			{
+				trace(event.target.name );
+				
+				// The background was clicked
+				if (event.target.name == canvas.name)
+				{
+					groupRight.visible = true;
+					borderItem.visible = false;
+					borderPositioning.visible = false;
+					borderEffects.visible = false;
+					borderTextFormat.visible = false;
+					spacerTextFormat.height = 0;
+					borderTimes.visible = false;					
+					
+					_objectHandles.selectionManager.clearSelection();
+				}
+			}
+			
+			private function addTextItem():void
+			{
+				var detail:OverlayDetail = new OverlayDetail(_overlay.itemName, OverlayDetail.TYPE_TEXT);
+				detail.height = OverlayDetail.DEFAULT_TEXT_HEIGHT.toString();
+				detail.width = OverlayDetail.DEFAULT_TEXT_WIDTH.toString();		
+				detail.text = OverlayDetail.DEFAULT_TEXT_TEXT;
+				detail.color = OverlayDetail.DEFAULT_TEXT_COLOR;
+				detail.fontFamily = OverlayDetail.DEFAULT_TEXT_FONT;
+				detail.fontSize = OverlayDetail.DEFAULT_TEXT_SIZE;
+				detail.fontStyle = OverlayDetail.DEFAULT_TEXT_STYLE;
+				detail.fontWeight =  OverlayDetail.DEFAULT_TEXT_WEIGHT;
+				detail.textDecoration = OverlayDetail.DEFAULT_TEXT_DECOR;						
+				
+				// Try and stagger
+				var overlayCount:int = _overlayDetail.length;
+				detail.x = (overlayCount * 10).toString();
+				detail.y = (overlayCount * 10).toString();
+				detail.z = _overlayDetail.length.toString();
+				detail.accountId = _appManager.currentAccount.itemName;
+				detail.effectId = _appManager.currentAccount.defaultEffectId;
+				
+				_overlayDetail.addItem(detail);			
+				addItemToCanvas(detail);
+				
+				// Update the right side too
+				ddItems.selectedIndex = _overlayDetail.length - 1;
+				ddItems_changeHandler(null);
+				_isDirty = true;				
+			}
+			
+			private function typeSelectHandler(event:Event):void
+			{
+				searchBox.showClear(!selectMediaTypes.allSelected);
+				_medias.refresh();
+			}
+			
+			protected function chkStartToEnd_clickHandler(event:MouseEvent):void
+			{
+				if (chkStartToEnd.selected)
+				{
+					borderTimes.height = HEIGHT_TIMES_SHRANK;					
+				}
+				else
+				{
+					borderTimes.height = HEIGHT_TIMES_FULL;
+				}
+				
+				if (_selectedItem != null)
+				{
+					_selectedItem.overlayDetail.playAlways = chkStartToEnd.selected
+				}
+				_isDirty = true;
+			}
+			
+			private function durationChangeHandler(event:Event):void
+			{
+				_selectedItem.overlayDetail.startTime = durStart.duration.toString();
+				_selectedItem.overlayDetail.endTime = durEnd.duration.toString();
+				_isDirty = true;
+			}
+			
+			protected function ddEffect_changeHandler(event:IndexChangeEvent):void
+			{
+				_isDirty = true;
+				_selectedItem.overlayDetail.effectId = ddEffect.selectedItem.value;
+			}
+			
+			private function overlayAspectChange(event:Event):void
+			{
+				// Switch the constraint on Aspect
+				var overlayItem:GroupOverlayItem = event.target as GroupOverlayItem;
+				_objectHandles.unregisterModel(overlayItem);
+				
+				var constraints:Array = overlayItem.maintainAspect ? [new MaintainProportionConstraint()] : null;
+				
+				_objectHandles.registerComponent(overlayItem, overlayItem, HandleDefinitions.DEFAULT_PLUS_MOVE_DEFINITION, 
+					true, constraints );
+				_objectHandles.selectionManager.setSelected(overlayItem);
+			}
+			
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<s:RadioButtonGroup id="TimesFrames"/>
+	</fx:Declarations>
+	<s:VGroup id="groupLeft" width="215" left="5" top="5" bottom="5" horizontalAlign="center">
+		<s:BorderContainer styleName="Main" width="100%" height="45" dropShadowVisible="true">
+			<s:Label text="Name" left="5" top="5" fontWeight="bold"/>
+			<s:TextInput y="18" left="5" right="5" id="txtOverlayName" change="{_isDirty = true;}" text="@{_overlay.name}"/>			
+		</s:BorderContainer>
+
+		<s:BorderContainer styleName="Main" width="100%" height="54" id="borderDuration" dropShadowVisible="true">
+			<s:Label text="Duration" fontWeight="bold" x="5" top="5"/>
+			<components:Duration id="baseDuration" x="10" y="18" click="{_isDirty = true}"/>
+		</s:BorderContainer>
+
+		<s:BorderContainer styleName="Main" width="100%" id="borderPlayTimes" height="104" dropShadowVisible="true">
+			<s:Label text="Play Times" fontWeight="bold" x="5" top="5"/>
+			<s:CheckBox x="10" y="24" label="Play any time" id="chkPlayTimes" selected="true" click="chkPlayTimes_clickHandler(event)"/>
+			<mx:DataGrid id="gridTimes" left="10" top="45" right="5" bottom="5" showHeaders="false" rowHeight="24"
+						 dataProvider="{_playTimes}" rowCount="{_playTimes.length}" editable="true"  
+						 itemEditEnd="gridTimes_itemEditEndHandler(event)" itemClick="gridTimes_itemClickHandler(event)" >
+				<mx:columns>
+					<mx:DataGridColumn dataField="startTime" />
+					<mx:DataGridColumn dataField="endTime" />
+					<mx:DataGridColumn itemRenderer="com.stratoscreen.renderers.UpdateRow" width="24" editable="false"/>
+				</mx:columns>
+			</mx:DataGrid>			
+		</s:BorderContainer>	
+		
+		<s:Line width="95%" >
+			<s:stroke>
+				<s:SolidColorStroke color="#3E63C1" weight="2" />
+			</s:stroke>				
+		</s:Line>			
+		
+		<s:BorderContainer styleName="Main" width="100%" height="50">
+			<s:Label text="Overlay Text" left="5" top="5" fontWeight="bold"/>
+			<s:BorderContainer id="borderText"  styleName="MediaDetail" width="153" height="24" right="5" bottom="5"
+							   mouseDown="dragBeginHandler(event)" >
+				<s:Label x="26" y="7" text="New text field" fontWeight="bold"/>
+				<mx:Image x="2" y="2" width="16" height="16" source="@Embed('assets/icons/font.png')"/>
+				<components:ActionIcon width="16" height="16" verticalCenter="0" right="4" source="@Embed('assets/icons/add.png')" click="addTextItem()"/>
+			</s:BorderContainer>
+		</s:BorderContainer>
+
+		<s:BorderContainer styleName="Main" width="100%" height="100%">
+			<s:Label text="Media" left="5" top="5" fontWeight="bold"/>
+			<components:SearchBox id="searchBox" right="55" top="20" left="5"/>
+			<components:TextSortButton top="20" right="5" id="btnSort"  toolTip="Sort media by name"/>
+			<components:FilterButton right="30" top="20" id="btnFilter" />
+			<s:PopUpAnchor right="52" top="42" id="popUpTypes" displayPopUp="{btnFilter.selected}">
+				<components:SelectMediaTypes id="selectMediaTypes"  />
+			</s:PopUpAnchor>
+
+			<s:List id="listMedia" dataProvider="{_medias}" itemRenderer="com.stratoscreen.renderers.DragMediaItem" 
+					dragEnabled="true" allowMultipleSelection="true" left="5" top="50" bottom="5" right="0"  borderVisible="false">
+				<s:layout>
+					<s:VerticalLayout paddingLeft="0" paddingRight="5" paddingTop="0" paddingBottom="0" rowHeight="28" variableRowHeight="false" horizontalAlign="left" gap="2"/>
+				</s:layout>
+			</s:List>
+		</s:BorderContainer>
+	</s:VGroup>
+
+	<s:Group id="groupLayer" left="228" top="5" right="211" bottom="5">
+		<s:Scroller id="scroller" height="100%" width="100%">
+			<s:Group id="groupContainer"  height="100%" width="100%">
+				<s:Group id="canvas" name="canvas" clipAndEnableScrolling="true" click="canvas_clickHandler(event)" >
+					<s:Rect id="rectBackground" width="100%" height="100%">
+						<s:stroke>
+							<s:SolidColorStroke color="#404040" weight="1"/>
+						</s:stroke>		
+						<s:fill>
+							<s:LinearGradient rotation="-45">
+								<s:GradientEntry color="#E0E0E0" />
+								<s:GradientEntry color="#FFFFFF" />
+								<s:GradientEntry color="#E0E0E0" />
+							</s:LinearGradient>
+						</s:fill>
+					</s:Rect>
+				</s:Group>
+			</s:Group>
+		</s:Scroller>									
+	</s:Group>
+
+	<s:VGroup id="groupRight" width="200" right="5" top="5" height="100%" horizontalAlign="right" gap="0">
+		<s:BorderContainer styleName="Main" width="100%" height="78">
+			<s:Label text="Canvas" fontWeight="bold" x="5" y="9"/>
+			<s:Label x="10" y="28" text="Size" fontWeight="normal"/>
+			<s:TextInput x="60" y="23" width="50" id="txtCanvasWidth" maxChars="4" restrict="0-9"  toolTip="Width" enter="canvasSize_changeHandler(event)" text="@{_overlay.width}"/>
+			<s:Label x="113" y="29" text="X" fontWeight="normal"/>
+			<s:TextInput x="124" y="23" width="50" id="txtCanvasHeight" maxChars="4" restrict="0-9"  toolTip="Height" enter="canvasSize_changeHandler(event)" text="@{_overlay.height}"/>
+
+			<s:Label text="Zoom" fontWeight="normal" x="10" y="53"/>
+			<s:DropDownList id="ddZoom" selectedIndex="0" change="ddZoom_changeHandler(event)" y="48" right="10" left="60">
+				<s:dataProvider>
+					<s:ArrayCollection>
+						<fx:Object label="100%" value="1" />
+						<fx:Object label="50%" value=".5" />
+						<fx:Object label="Fit" value="0" />
+					</s:ArrayCollection>
+				</s:dataProvider>
+			</s:DropDownList>
+		</s:BorderContainer>
+		
+		<mx:Spacer height="{SPACER_GAP}" />
+
+		<s:BorderContainer styleName="Main" width="100%" height="28" id="borderItem">
+			<s:Label text="Item" fontWeight="bold" x="5" verticalCenter="0"/>
+			<s:DropDownList id="ddItems" dataProvider="{_overlayDetail}" verticalCenter="0" 
+							change="ddItems_changeHandler(event)" labelFunction="getItemLabel"  left="45" right="30"/>
+			<components:IconButton id="btnDelete" verticalCenter="0" right="5" icon="{iconDelete}" 
+								   click="btnDelete_clickHandler(event)" toolTip="Remove item from overlay" />
+		</s:BorderContainer>
+
+		<mx:Spacer height="{SPACER_GAP}" />
+		
+		<s:BorderContainer id="borderPositioning" styleName="Main" width="100%"  height="160">
+			<s:Label text="Positioning" fontWeight="bold" x="5" y="9"/>
+			<s:Label x="10" y="34" text="Size" fontWeight="normal"/>
+			<s:TextInput id="txtWidth" x="60" y="29" width="50" change="{_isDirty = true}"
+						 enter="itemChangeHandler(event)" focusOut="itemChangeHandler(event)"
+						 maxChars="4" restrict="0-9" toolTip="Width"/>
+			<s:Label x="113" y="35" text="X" fontWeight="normal"/>
+			<s:TextInput id="txtHeight" x="124" y="29" width="50" change="{_isDirty = true}"
+						 enter="itemChangeHandler(event)" focusOut="itemChangeHandler(event)"
+						 maxChars="4" restrict="0-9" toolTip="Height"/>
+			<s:Label x="10" y="59" text="X, Y" fontWeight="normal" />
+			<s:TextInput id="txtX" x="60" y="54" width="50" change="{_isDirty = true}"
+						 enter="itemChangeHandler(event)" focusOut="itemChangeHandler(event)"
+						 maxChars="4" restrict="0-9\-"/>
+			<s:TextInput id="txtY" x="124" y="54" width="50" change="{_isDirty = true}"
+						 enter="itemChangeHandler(event)" focusOut="itemChangeHandler(event)"
+						 maxChars="4" restrict="0-9\-"/>
+			<s:Label x="115" y="60" text="," fontWeight="bold"/>
+			<s:Label x="10" y="84" text="Rotate" fontWeight="normal" />
+			<s:NumericStepper x="60" y="79" width="50" minimum="-180" maximum="180" stepSize="1" id="stepRotate" change="stepRotate_changeHandler(event)" value="0" />
+			<s:Label x="10" y="109" text="Alpha" fontWeight="normal" />
+			<s:HSlider x="60" y="109" id="slideAlpha" minimum="0.0" maximum="1.0" stepSize="0.1" value="1" 
+					   change="slideAlpha_changeHandler(event)"  width="115"/>
+			<s:Label x="10" y="134" text="z Index" fontWeight="normal" />
+			<components:IconButton id="btnToFront" icon="{iconToFront}" 
+								   toolTip="Move item to top" click="zorderHandler(event, true)" y="125" x="60"/>
+			<components:IconButton top="125"  left="85" id="btnToBottom" icon="{iconToBottom}" 
+								   toolTip="Move item to bottom" click="zorderHandler(event, false)"/>
+		</s:BorderContainer>
+
+		<mx:Spacer id="spacerEffects" height="{SPACER_GAP}" />
+		
+		<s:BorderContainer id="borderEffects" styleName="Main" width="100%"  height="28" >
+			<s:Label text="Transition" fontWeight="bold" x="5" verticalCenter="0"/>
+			<s:DropDownList id="ddEffect" dataProvider="{EffectsManager.effectsList}" change="ddEffect_changeHandler(event)" verticalCenter="0" left="65" right="5"/>
+		</s:BorderContainer>
+
+		<mx:Spacer id="spacerTextFormat" height="{SPACER_GAP}" />
+		
+		<s:BorderContainer id="borderTextFormat" styleName="Main" width="100%"  height="145">
+			<s:Label text="Formatting" fontWeight="bold" x="5" y="9"/>
+			<s:Label x="10" y="35" text="Font" fontWeight="normal"/>
+			<s:DropDownList x="55" y="29" id="ddFont" width="125" change="ddFont_changeHandler(event)">
+				<s:dataProvider>
+					<s:ArrayCollection>
+						<fx:Object label="Arial" value="arialEmbed" />
+						<fx:Object label="Courier" value="courierEmbed" />
+						<fx:Object label="Times" value="timesRomanEmbed" />
+						<fx:Object label="Verdana" value="verdanaEmbed" />
+					</s:ArrayCollection>
+				</s:dataProvider>
+			</s:DropDownList>
+			<s:Label x="10" y="62" text="Size" fontWeight="normal"/>
+			<s:ComboBox x="55" y="55" maxChars="3" restrict="0-9" id="ddSize" width="67" change="ddSize_changeHandler(event)">
+				<s:dataProvider>
+					<s:ArrayCollection>
+						<fx:Object label="16" value="16" />
+						<fx:Object label="20" value="20" />
+						<fx:Object label="24" value="24" />
+						<fx:Object label="28" value="28" />
+						<fx:Object label="36" value="36" />
+						<fx:Object label="48" value="48" />
+						<fx:Object label="72" value="72" />
+						<fx:Object label="96" value="96" />
+						<fx:Object label="120" value="120" />
+						<fx:Object label="144" value="144" />
+					</s:ArrayCollection>
+				</s:dataProvider>
+			</s:ComboBox>
+			<s:Label x="10" y="89" text="Color" fontWeight="normal"/>
+			<mx:ColorPicker id="colorPick" x="55" y="83" change="colorPick_changeHandler(event)"/>
+			<components:IconToggleButton id="toggleBold" x="55" y="113" icon="{iconBold}" click="bold_clickHandler(event)"/>
+			<components:IconToggleButton id="toggleItalic" x="75" y="113" icon="{iconItalic}" click="italic_clickHandler(event)"/>
+			<components:IconToggleButton id="toggleUnderline" x="95" y="113" icon="{iconUnderline}" click="underline_clickHandler(event)"/>
+		</s:BorderContainer>	
+		
+		<mx:Spacer id="spacerTimes" height="{SPACER_GAP}" />
+		
+		<s:BorderContainer id="borderTimes" styleName="Main" width="100%"  height="135">
+			<s:Label text="Display Time" fontWeight="bold" x="5" y="9"/>
+			<s:VGroup x="10" y="30">
+				<s:CheckBox label="Play from start to end" id="chkStartToEnd" click="chkStartToEnd_clickHandler(event)"/>
+				<mx:ViewStack id="vsTimes" width="187" height="61"  visible="{!chkStartToEnd.selected}"  creationPolicy="all">
+					<s:NavigatorContent label="Time" width="100%" height="100%" >
+						<s:Label x="0" y="8" text="Start" fontWeight="normal"/>
+						<components:Duration id="durStart" x="36" y="0" width="150" />
+						<s:Label x="0" y="36" text="End" fontWeight="normal"/>
+						<components:Duration id="durEnd" x="36" y="28" width="150" />
+					</s:NavigatorContent>
+				</mx:ViewStack>		
+			</s:VGroup>
+		</s:BorderContainer>
+
+		<mx:Spacer height="100%" />
+			
+		<s:Button label="Save" bottom="10" right="5" id="btnSave" enabled="{_isDirty}" click="btnSave_clickHandler(event)"/>
+		<mx:Spacer height="1" />
+	</s:VGroup>	
+
+	<s:BorderContainer id="borderThumb" dropShadowVisible="true" y="325" >
+		<mx:Image id="imgThumb" scaleContent="true" maintainAspectRatio="true" />	
+	</s:BorderContainer>
+	
+	<s:controlBarContent>	
+	</s:controlBarContent>
+</s:TitleWindow>

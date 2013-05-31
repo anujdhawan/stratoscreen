@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*" 
+				xmlns:renderers="com.stratoscreen.renderers.*"  autoDrawBackground="true" height="28" 
+				creationComplete="this_creationCompleteHandler(event)"  >
+	<fx:Declarations>
+		<renderers:MediaThumbItem id="mediaThumb" data="{_media}" width="36" height="26" verticalCenter="0" horizontalCenter="0"  />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Medias;
+			
+			import mx.events.FlexEvent;
+
+			private static var _appManager:AppManager;
+
+			[Bindable] private var _name:String;
+			[Bindable] private var _media:Medias;
+			private var _data:Object;
+			
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				if (_appManager == null) {_appManager = this.parentApplication.appManager;}	
+				this.data = _data // Draw the renderer
+			}
+			
+			public override function set selected(value:Boolean):void
+			{
+				super.selected = value;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				if (_appManager == null) {_appManager = this.parentApplication.appManager;}	
+
+				if (value== null) {return;}
+				if (borderMain == null) {return;}		// Item is still renderering		
+				
+				_data = value;				
+				_name = data.baseName;
+				
+				groupIcon.removeAllElements();				
+				_media = _appManager.getMedia(_data.baseMediaId);
+				if (_media != null) {groupIcon.addElement(mediaThumb);}
+			}
+			
+			public override function get data():Object
+			{
+				return _data;
+			}	
+			
+			
+			protected function actionicon1_clickHandler(event:MouseEvent):void
+			{
+				Object(_appManager.currentEditWindow).changeBase();
+			}
+			
+		]]>
+	</fx:Script>
+	
+	<s:BorderContainer id="borderMain" styleName="DragItem" width="100%" height="28">
+		<s:HGroup width="100%" height="100%" verticalAlign="middle" gap="2">
+			<mx:Spacer />
+
+			<components:ActionIcon width="16" height="16" verticalCenter="0" source="@Embed('/assets/icons/image_edit.png')" 
+								   click="actionicon1_clickHandler(event)" toolTip="Replace overlay base" />
+
+			<s:Group id="groupIcon" width="36" height="26">
+				
+			</s:Group>
+			<s:Label text="{_name}" maxDisplayedLines="1"  width="100%"/>
+		</s:HGroup>
+	</s:BorderContainer>		
+</s:ItemRenderer>

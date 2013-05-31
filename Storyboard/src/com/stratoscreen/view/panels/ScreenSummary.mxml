@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				   xmlns:mx="library://ns.adobe.com/flex/mx"  xmlns:components="com.stratoscreen.components.*" 
+				   width="100%" height="138"  styleName="Panel"  creationComplete="creationCompleteHandler(event)"  >
+	<fx:Declarations>
+		<s:SolidColorStroke id="lineCallout" color="#808080" />	
+		<s:SolidColorStroke id="lineGreyBorder" color="#808080" />
+		<s:LinearGradient id="gradientGreen" rotation="45">
+			<s:GradientEntry color="#30CF53" ratio=".2" alpha="0.9"/>
+			<s:GradientEntry color="#27A542" ratio=".8" alpha="0.9"/>
+		</s:LinearGradient>
+		<s:LinearGradient id="gradientBlack" rotation="45">
+			<s:GradientEntry color="#666666" ratio=".2" alpha="0.9"/>
+			<s:GradientEntry color="#4D4D4D" ratio=".8" alpha="0.9"/>
+		</s:LinearGradient>		
+		<s:LinearGradient id="gradientGrey" rotation="45">
+			<s:GradientEntry color="#C4C4C4" ratio=".2" alpha="0.9"/>
+			<s:GradientEntry color="#ABABAB" ratio=".8" alpha="0.9"/>
+		</s:LinearGradient>
+		<s:LinearGradient id="gradientWhite" rotation="45">
+			<s:GradientEntry color="#FAFAFA" ratio=".2" alpha="0.9"/>
+			<s:GradientEntry color="#F2F2F2" ratio=".8" alpha="0.9"/>
+		</s:LinearGradient>
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.controller.ScreenControl;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Screens;
+			
+			import mx.charts.HitData;
+			import mx.collections.ArrayCollection;
+			import mx.events.FlexEvent;
+
+			[Bindable][Embed(source="/assets/icons/arrow_refresh.png")]
+			private var iconRefresh:Class;			
+
+			private var _totalUsed:int;
+			[Bindable] private var _totalLicense:int;
+			[Bindable] private var _pending:int;
+			[Bindable] private var _active:int;
+			[Bindable] private var _offline:int;
+			[Bindable] private var _unused:int;
+			[Bindable] private var _tooltip:String;
+			[Bindable] private var _queryError:Boolean;
+			[Bindable] private var _chartData:ArrayCollection;
+			private var _appManager:AppManager
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				_totalLicense = _appManager.currentAccount.licenseCountInt + _appManager.currentAccount.paidLicenseCount;
+				
+				// Remove the drop shadows on the filters
+				seriesScreen.filters= [];
+				 
+				loadSummaries();
+			}
+			
+			private function btnRefresh_clickHandler(event:Event):void
+			{
+				loadSummaries();
+			}
+			
+			protected function loadSummaries():void
+			{
+				var control:ScreenControl = new ScreenControl(_appManager);
+				control.addEventListener(ScreenControl.QUERY_COMPLETE, queryScreensHandler);
+				control.addEventListener(ScreenControl.QUERY_ERROR, queryScreensHandler);
+				control.queryAndUpdateScreens();
+				
+				this.enabled = false;
+			}
+
+			private function queryScreensHandler(event:Event):void
+			{
+				this.enabled = true;
+				var control:ScreenControl = event.target as ScreenControl;
+				control.removeEventListener(ScreenControl.QUERY_COMPLETE, queryScreensHandler);
+				control.removeEventListener(ScreenControl.QUERY_ERROR, queryScreensHandler);
+
+				_tooltip = "";
+				
+				if (!control.success) 
+				{
+					_tooltip = "Error retriving Screen summary. Please refresh later";
+					return;	
+				}
+				
+				// Loop through and get a summay of all the statuses
+				_totalUsed = 0;
+				_active = 0;
+				_offline = 0;
+				_pending = 0;
+				for each (var scrn:Screens in control.screens)
+				{
+					_totalUsed ++;
+					
+					switch (scrn.status)
+					{
+						case Screens.STATUS_PENDING:
+							_pending ++;
+							break;
+
+						case Screens.STATUS_ACTIVE:
+							scrn.isOnline ? _active ++ : _offline ++;
+							break;
+					}
+				}
+				_unused = _totalLicense - _totalUsed;
+				
+				// Create the array for the chart
+				_chartData = new ArrayCollection();
+				var item:Object = new Object();
+				item.label = "Active";
+				item.value = _active;
+				_chartData.addItem(item);
+
+				item = new Object();
+				item.label = "Offline";
+				item.value = _offline;
+				_chartData.addItem(item);
+				
+				item = new Object();
+				item.label = "Pending";
+				item.value = _pending;
+				_chartData.addItem(item);
+				
+				item = new Object();
+				item.label = "Unused Screen Codes";
+				item.value = _unused;
+				_chartData.addItem(item);
+
+			}
+
+			private function countTipHandler(hitData:HitData):String
+			{
+				var tip:String = hitData.item.label + ": " + hitData.item.value.toString();
+				return tip;
+			}
+
+		]]>
+	</fx:Script>
+	<s:Label x="10" y="10" text="Screen Summary" fontWeight="bold" fontSize="11"/>
+	<components:IconButton id="btnRefresh" icon="{iconRefresh}" toolTip="Refresh data"
+						   click="btnRefresh_clickHandler(event)"  right="5" top="5"/>
+
+	<s:HGroup y="0" height="100%" left="250" verticalAlign="middle"  right="30">
+		<mx:PieChart  id="chartTVs"  dataProvider="{_chartData}" width="135" height="135" showDataTips="true" dataTipFunction="countTipHandler">
+			<mx:series>
+				<mx:PieSeries id="seriesScreen" nameField="label"	labelPosition="none" outerRadius="100"
+							  field="value" radialStroke="{lineGreyBorder}"  calloutStroke="{lineCallout}" 
+							  stroke="{lineGreyBorder}" fills="{[gradientGreen, gradientBlack, gradientGrey, gradientWhite]}" />		
+			</mx:series>
+		</mx:PieChart>		
+		<mx:Spacer width="100%" />
+	</s:HGroup>
+
+	<s:VGroup y="35" left="10" width="90" gap="10">
+		<!--
+		<s:HGroup>
+			<s:Label x="10" y="30" text="Total" fontWeight="bold" toolTip="{_tooltip}"  width="60"/>
+			<s:Label x="46" y="30" text="{_totalLicense}"/>					
+		</s:HGroup>
+		-->
+		<s:HGroup>
+			<s:Label x="10" y="30" text="Active" fontWeight="bold" toolTip="{_tooltip}" width="60" color="#27A542"/>
+			<s:Label x="46" y="30" text="{_active}"/>					
+		</s:HGroup>
+		<s:HGroup>
+			<s:Label x="10" y="30" text="Offline" fontWeight="bold" toolTip="{_tooltip}" width="60" color="#666666"/>
+			<s:Label x="46" y="30" text="{_offline}"/>			
+		</s:HGroup>
+		<s:HGroup>
+			<s:Label x="10" y="30" text="Pending" fontWeight="bold" toolTip="{_tooltip}" width="60" color="#9E9E9E"/>
+			<s:Label x="46" y="30" text="{_pending}"/>					
+		</s:HGroup>		
+		<s:HGroup>
+			<s:Label x="10" y="30" text="Unused" fontWeight="bold" toolTip="{_tooltip}" width="60"  fontStyle="italic"/>
+			<s:Label x="46" y="30" text="{_unused}"/>					
+		</s:HGroup>
+	</s:VGroup>
+</s:BorderContainer>

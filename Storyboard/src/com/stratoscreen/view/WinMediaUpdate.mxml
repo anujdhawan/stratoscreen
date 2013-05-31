@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="400" height="92" 
+			   creationComplete="creationCompleteHandler(event)"  title="Updating media" close="closeHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			[Bindable] public var message:String = "Updating media";
+			public var showCloseButton:Boolean = false;
+			
+			public function set percentComplete(value:Number):void
+			{
+				if (barProgress == null) {return;}
+				
+				barProgress.setProgress(value, 1);
+			}
+			
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				this.closeButton.visible = showCloseButton;
+			}
+
+
+
+			protected function closeHandler(event:CloseEvent):void
+			{
+				// Do not close the window only hide it. There is work happening
+				this.visible = false;
+			}
+
+		]]>
+	</fx:Script>
+	<s:controlBarContent>
+		<mx:ProgressBar labelPlacement="center" color="#202020" id="barProgress" label="" width="100%" x="10" height="10" mode="manual"/>
+	</s:controlBarContent>
+	<s:Label x="10" y="9" text="{message}" width="378" textAlign="center"/>
+</s:TitleWindow>

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:MXDataGridItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+						  xmlns:mx="library://ns.adobe.com/flex/mx"  focusEnabled="true" height="16" width="16" 
+						  creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.model.domains.Medias;
+			
+			import mx.events.FlexEvent;
+			
+			[Bindable][Embed(source="assets/icons/image.png")]
+			private var iconImage:Class;
+			[Bindable][Embed(source="assets/icons/audio.png")]
+			private var iconAudio:Class;
+			[Bindable][Embed(source="assets/icons/film.png")]
+			private var iconVideo:Class;
+			[Bindable][Embed(source="assets/icons/swf.png")]
+			private var iconSWF:Class;
+			
+			private var _data:Object;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.data = _data;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				_data = value;
+				if (value is Medias)
+				{
+					var media:Medias = value as Medias;
+					switch (media.mediaType)
+					{
+						case Constants.MEDIA_TYPE_AUDIO:
+							imgType.source = iconAudio;
+							imgType.toolTip = "Audio";
+							break;
+						
+						case Constants.MEDIA_TYPE_IMAGE:
+							imgType.source = iconImage;
+							imgType.toolTip = "Image";
+							break;
+
+						case Constants.MEDIA_TYPE_SWF:
+							imgType.source = iconSWF;
+							imgType.toolTip = "Flash (SWF)";
+							break;
+
+						
+						case Constants.MEDIA_TYPE_VIDEO:
+							imgType.source = iconVideo;
+							imgType.toolTip = "Video";
+							break;
+					}
+				}
+				else
+				{
+					trace("");
+				}
+			}
+			
+		]]>
+	</fx:Script>
+	<mx:Image id="imgType" x="3" y="0" height="16" width="16"/>
+</s:MXDataGridItemRenderer>

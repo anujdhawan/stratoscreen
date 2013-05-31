@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="500" height="390" 
+			   creationComplete="creationCompleteHandler(event)"  title="Download Schedule" xmlns:components="com.stratoscreen.components.*">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.AppManager;
+			
+			import mx.controls.Alert;
+			import mx.events.FlexEvent;
+			
+			public var screen_:Screen;
+
+			private var _appManager:AppManager;
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.closeButton.visible = false;
+				_appManager = this.parentApplication.appmanager;
+				
+				// We have alot of data to get for this 
+				
+			}
+
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+			}
+
+		]]>
+	</fx:Script>
+	<s:Label x="10" y="10" text="Storage Requirements" fontWeight="bold"/>
+	<components:LoadingLabel id="lblSize" x="143" y="10"/>
+	<s:Button label="Save to drive" right="10" bottom="10" id="btnSave" click="btnSave_clickHandler(event)"/>
+	
+	<s:controlBarContent>
+		<s:Label id="lblStatus" />
+	</s:controlBarContent>
+</s:TitleWindow>

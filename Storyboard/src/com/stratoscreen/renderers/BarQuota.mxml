@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" 
+				xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" 
+				autoDrawBackground="true" creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			
+			[Bindable] private var _borderColor:uint;
+			[Bindable] private var _fillColor1:uint;
+			[Bindable] private var _fillColor2:uint;
+			
+			private var _data:Object;
+			
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+			}
+			
+			public override function set data(value:Object):void
+			{
+				// Change the bar color dependant on the usage
+				if (value.xNumber >= 90)
+				{
+					_borderColor = 0xD45959;
+					_fillColor1 = 0xE49595;
+					_fillColor2 = 0xDF8181;	
+				}
+				else if (value.xNumber >= 75)
+				{
+					_borderColor = 0xFF944D;
+					_fillColor1 = 0xFFB380;
+					_fillColor2 = 0xFFA366;					
+				}
+				else if (value.xNumber >= 60)
+				{
+					_borderColor = 0xE6E600;
+					_fillColor1 = 0xFFFF80;
+					_fillColor2 = 0xFFFF00;	
+				}
+				else
+				{
+					_borderColor = 0x27A542;
+					_fillColor1 = 0x30CF53;
+					_fillColor2 = 0x2CBA4B;
+				}
+			}
+			
+			public override function get data():Object
+			{
+				return _data;
+			}
+
+		]]>
+	</fx:Script>
+	
+	<s:Rect id="rectBack" width="100%" top="2" bottom="2" left="1">
+		<s:stroke>
+			<s:SolidColorStroke color="{_borderColor}" weight="1"/>
+		</s:stroke>	
+		<s:fill>
+			<s:LinearGradient rotation="15">
+				<s:GradientEntry color="{_fillColor1}" />
+				<s:GradientEntry color="{_fillColor2}" />
+			</s:LinearGradient>
+		</s:fill>
+	</s:Rect>
+</s:ItemRenderer>

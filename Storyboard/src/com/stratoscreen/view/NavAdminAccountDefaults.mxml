@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%" 
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.EffectsManager;
+			import com.stratoscreen.model.domains.Accounts;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.controls.Alert;
+			import mx.events.FlexEvent;
+			
+			private var _appManager:AppManager;
+			private var _shown:Boolean = false;			
+			[Bindable] private var _account:Accounts;
+			[Bindable] private var _defaultDuration:int;
+			[Bindable] private var _isDirty:Boolean = false;
+
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+				
+				//The nav may need a kick start
+				if (btnSave != null) {showHandler(null);}
+			}
+			
+			public function get isDirty():Boolean
+			{
+				return _isDirty;
+			}
+
+
+			protected function showHandler(event:FlexEvent):void
+			{
+				// We have a rendering issue. Allow the screen to catch up
+				this.callLater(loadAccount);
+			}
+			
+			private function loadAccount():void
+			{
+				// Copy the account to avoid overwriting
+				_account = Utils.copyClassObject(Accounts, _appManager.currentAccount);
+				
+				// Watch for any invalid data
+				_defaultDuration = parseInt(_account.defaultDuration);
+				if (_defaultDuration <= 0) {_defaultDuration = parseInt(_appManager.currentAccount.defaultDuration);}
+				
+				// Find the View Method of the Screen
+				for (var i:int = 0; i < ddView.dataProvider.length; i++)
+				{
+					if (ddView.dataProvider[i].value == _account.defaultScreenView)
+					{
+						ddView.selectedIndex = i;
+						break;
+					}
+				}			
+				
+				for ( i = 0; i < ddEffects.dataProvider.length; i++)
+				{
+					if (_appManager.currentAccount.defaultEffectId == ddEffects.dataProvider[i].value)
+					{
+						ddEffects.selectedIndex = i;
+						break;
+					}
+				}
+			}
+
+			protected function btnCancel_clickHandler(event:MouseEvent):void
+			{
+				showHandler(null);
+				_isDirty = false;
+			}
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				if (DemoUtils.isDemo()) {return;}
+				
+				_account.updated = true;
+				_account.defaultDuration = _defaultDuration.toString();
+				_account.defaultScreenView = ddView.selectedItem.value;
+				_account.defaultEffectId = ddEffects.selectedItem.value;
+				
+				_appManager.sdb.updateDomain([_account], updateAccountHandler);
+			}
+			
+			private function updateAccountHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not update Account. Please try again later", "Update Error");
+					showHandler(null);
+					return;
+				}
+				
+				_appManager.currentAccount = _account;
+				_isDirty = false;
+			}
+
+
+
+		]]>
+	</fx:Script>
+	<s:VGroup height="100%" width="100%">
+		<s:BorderContainer height="70" width="100%" styleName="Panel">
+			<s:Label x="10" y="13" text="Media Duration" height="20" fontWeight="bold"/>
+			<s:NumericStepper x="115" y="10" width="55" value="@{_defaultDuration}" minimum="1" stepSize="1" change="{_isDirty=true}" maximum="9999"/>
+			<s:RichText left="245" top="10" right="10" bottom="10">
+				<s:text>The default duration is applied to media that do not have an ending event. For example, Images and SWFs.  Some SWFs can can be tracked to a Frame number depending on the type.
+					
+Changing the default duration will only affect newly created media, groups and channels. Current media will not be affected.
+				</s:text>
+			</s:RichText>
+			
+		</s:BorderContainer>
+		<s:BorderContainer height="70" width="100%" styleName="Panel" >
+			<s:Label x="10" y="12" text="Transition" height="20" fontWeight="bold"/>
+			<s:DropDownList id="ddEffects" x="115" y="10" dataProvider="{EffectsManager.effectsList}"  change="{_isDirty = true}" />
+			<s:RichText left="245" top="10" right="10" bottom="10">
+				<s:text>An introduction transition can be applied to media media in a channel and/or group. Transitions can also be applied to media and text in an overlay.
+
+Unfortunately, video cannot have an introduction effect because of hardware acceleration.
+				</s:text>
+			</s:RichText>
+		</s:BorderContainer>
+		
+		<s:BorderContainer height="165" width="100%" styleName="Panel" >
+			<s:Label x="10" y="12" text="TV View Mode" height="20" fontWeight="bold"/>
+			<s:DropDownList id="ddView" x="115" y="10" change="{_isDirty = true}">
+				<s:dataProvider>
+					<s:ArrayCollection>
+						<fx:Object label="Letterbox" value="{Constants.VIEW_LETTERBOX}" />
+						<fx:Object label="Full" value="{Constants.VIEW_FULL}" />
+						<fx:Object label="Stretch to fit" value="{Constants.VIEW_STRETCH}" />
+					</s:ArrayCollection>
+				</s:dataProvider>
+			</s:DropDownList>
+			<s:RichText left="245" top="10" right="10" bottom="10" >
+				<s:text>Screen come in all shapes and sizes. Widescreen, Standard, portrait, etc. Many times the media will not match the screen exactly. (e.g. Widescreen HD video on a standard screen). View mode will instruct the screen on how to best display the media.
+					
+Letterbox. Media will retain its aspect and the entire media will be displayed. A blank border will be added if required. 
+					
+Full. Media will retain its aspect, remain centered, and use all the screen. If the media aspect and screen ratio do not match the outer edges of the media will be truncated.
+					
+Stretch. The media will be resized to fit  screen no matter the sizes. 
+Hardware acceleration will not allow video to be stretched. Video will revert Letterbox mode.
+				</s:text>
+			</s:RichText>
+		</s:BorderContainer>
+		
+		<mx:Spacer height="25" />
+		<s:HGroup>
+			<s:Button label="Save" id="btnSave" enabled="{_isDirty}" click="btnSave_clickHandler(event)"/>
+			<s:Button label="Cancel" id="btnCancel" enabled="{_isDirty}" click="btnCancel_clickHandler(event)"/>			
+		</s:HGroup>
+
+	</s:VGroup>
+</s:NavigatorContent>

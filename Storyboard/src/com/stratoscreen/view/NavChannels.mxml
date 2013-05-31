@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:view="com.stratoscreen.view.*"
+					width="100%" height="100%" creationComplete="creationCompleteHandler(event)" 
+					show="showHandler(event)" xmlns:components="com.stratoscreen.components.*">
+	<fx:Script>
+		<![CDATA[			
+			import mx.collections.ArrayCollection;
+			import mx.events.FlexEvent;
+			import mx.utils.StringUtil;
+			
+			private var _shown:Boolean = false;
+			public var childData:ArrayCollection;
+			
+			[Bindable][Embed(source="/assets/icons/arrow_refresh.png")]
+			private var iconRefresh:Class;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+			}
+			
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (!_shown)
+				{
+					searchBox.addEventListener(SearchBox.SEARCH_SEARCH, searchHandler);
+					searchBox.addEventListener(SearchBox.SEARCH_CLEARED, searchClearHandler);
+					
+					_shown = true;
+				}
+			}
+			
+			private function searchHandler(event:Event):void
+			{
+				childData.filterFunction = searchFunction;
+				childData.refresh();
+			}
+			
+			private function searchClearHandler(event:Event):void
+			{
+				searchBox.txtSearch.text = "";
+				childData.filterFunction = null;
+				childData.refresh();				
+			}
+			
+			private function searchFunction(item:Object):Boolean
+			{
+				var itemName:String = item.name; 
+				if (itemName == null) {return false;}
+				itemName = itemName.toLowerCase();
+				
+				var searchText:String = searchBox.txtSearch.text.toLowerCase();
+				searchText = StringUtil.trim(searchText);
+				
+				return itemName.indexOf(searchText) >= 0;
+			}
+			
+			private function btnRefresh_clickHandler(event:Event):void
+			{
+				searchClearHandler(null);
+				Object(vsMain.selectedChild).refresh();
+			}
+		]]>
+	</fx:Script>
+	<s:HGroup right="10" top="10" width="33%">
+		<components:IconButton id="btnRefresh" icon="{iconRefresh}" toolTip="Refresh data" click="btnRefresh_clickHandler(event)" />
+		<components:SearchBox id="searchBox" width="100%"  />
+	</s:HGroup>
+	<mx:LinkBar x="10" y="10" dataProvider="{vsMain}" selectedIndex="0" />
+	<mx:ViewStack id="vsMain" width="100%" height="100%" x="5" y="40" >
+		<view:NavChannelsChannels id="navChannelsChannels" label="Channels" icon="@Embed(source='/assets/icons/film.png')" />
+		<view:NavChannelOverlay id="navChannelsOverlay" label="Channel Overlays" icon="@Embed(source='/assets/icons/film_palette.png')" />
+	</mx:ViewStack>
+</s:NavigatorContent>

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="creationCompleteHandler(event)" removedFromStage="removedFromStageHandler(event)" >
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.OverlayDetail;
+			
+			import mx.events.FlexEvent;
+			
+			import org.osmf.display.ScaleMode;
+			import org.osmf.events.MediaPlayerStateChangeEvent;
+			import org.osmf.media.MediaPlayerState;
+
+			private static const CYCLES_PER_SECOND:int = 3;		// Keep as low as possible 
+			
+			[Bindable] private var _overlayDetail:OverlayDetail;
+			
+			private var _startTime:int;
+			private var _endTime:int;
+			private var _timer:Timer = null;		
+			private var _loadSubmitted:Boolean = false;
+			private var _url:String = "";
+
+			public var appManager:AppManager;	// Assign this before overlayDetail
+			public var paused:Boolean;		// Required, but not used
+			public var currentFrame:int;	// This is not used by the video but required by the parent
+
+			public function get overlayDetail():OverlayDetail
+			{
+				return _overlayDetail;
+			}
+			
+			public function set overlayDetail(value:OverlayDetail):void
+			{
+				// Make sure the appManager is assigned before this property
+				_overlayDetail = value;
+				
+				// Create the timers if needed
+				_startTime = parseInt(_overlayDetail.startTime);
+				_endTime = parseInt(_overlayDetail.endTime);
+				
+				// Watch for instance where the start is added but not the end
+				if (_startTime > 0 && _endTime == 0) {_endTime = int.MAX_VALUE;}
+				
+				if (_startTime > 0 || _endTime > 0)
+				{
+					var delay:Number = 1000 / CYCLES_PER_SECOND;
+					
+					_timer = new Timer(delay);
+					_timer.addEventListener(TimerEvent.TIMER, timerHandler)
+				}
+				
+				_url = appManager.s3.getSelectURL(appManager.currentAccount.bucket, _overlayDetail.mediaId);
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				videoDisplay.addEventListener(mx.events.VideoEvent.COMPLETE, videoCompleteHandler);
+				videoDisplay.filters = _overlayDetail.filters;
+				
+				var startVisible:Boolean = false;
+
+				if (_timer == null) {startVisible = true;}
+				startVisible = _startTime == 0;
+				
+				if (_timer != null) {_timer.start();}
+				this.visible = startVisible;
+				
+				if (startVisible) 
+				{
+					videoDisplay.source = _url;
+					_loadSubmitted = true;
+				}
+
+			}
+
+			protected function removedFromStageHandler(event:Event):void
+			{
+				this.removeAllElements();
+			}
+			
+			private function timerHandler(event:TimerEvent):void
+			{
+				var secondsElapsed:int = _timer.currentCount / CYCLES_PER_SECOND;
+				
+				if (secondsElapsed >= _startTime && !_loadSubmitted) 
+				{
+					this.visible = true;
+					videoDisplay.source = _url;
+					_loadSubmitted = true;
+				}
+				
+				if (secondsElapsed >= _endTime) 
+				{
+					_timer.stop();
+					videoDisplay.stop();
+					videoDisplay.visible = false;
+					this.visible = false;
+				}
+			}	
+
+			
+			protected function videoDisplay_mediaPlayerStateChangeHandler(event:MediaPlayerStateChangeEvent):void
+			{
+				switch (event.state)
+				{
+					case MediaPlayerState.BUFFERING:
+						lblBuffering.visible = true;
+						break;
+					
+					case MediaPlayerState.PLAYING:
+						if (_endTime > 0 )
+						{
+							if (!_timer.running) {_timer.start();}
+						}
+						lblBuffering.visible = false;
+						videoDisplay.visible = true;
+						break;
+					
+					default:
+						lblBuffering.visible = false;
+				}
+				
+			}
+
+			private function videoCompleteHandler(event:Event):void
+			{
+				videoDisplay.stop();
+				videoDisplay.visible = false;
+			}
+		]]>
+	</fx:Script>
+	<s:VideoDisplay id="videoDisplay"  mediaPlayerStateChange="videoDisplay_mediaPlayerStateChangeHandler(event)" autoPlay="true"  scaleMode="stretch" width="100%" height="100%"/>
+	<s:Label id="lblBuffering" text="Buffering" width="100%" alpha=".25" styleName="Buffering" bottom="40"/>
+</s:Group>

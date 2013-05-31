@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+				xmlns:mx="library://ns.adobe.com/flex/mx" autoDrawBackground="true" width="128" height="96" 
+				doubleClickEnabled="true" doubleClick="doubleClickHandler(event)"
+				creationComplete="creationCompleteHandler(event)">	
+		<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.ImageCacheManager;			
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.Overlays;
+			import com.stratoscreen.utils.ImageUtils;
+			import com.stratoscreen.view.Storyboard;
+			
+			import mx.events.FlexEvent;
+			
+			public static var bucket:String;
+			public static var S3Endpoint:String;
+			private static var _storyboard:Storyboard;
+			private static var _appManager:AppManager;
+			
+			[Bindable] private var _overlay:Overlays;
+			private var _data:Object = null;
+			private var _shown:Boolean;
+			private var _imageUtils:ImageUtils;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.data = _overlay;		// Draw the renderer
+				_storyboard = this.parentApplication.storyboard;
+				_appManager = this.parentApplication.appManager;
+				_imageUtils = new ImageUtils();
+			}
+
+			public override function get data():Object
+			{
+				return _data;
+			}
+			
+			public override function set data(value:Object):void
+			{
+				if (_data == value) {return;} // the item renderer has not changed
+				if (value == null) {return;}
+				_data = value;
+				_overlay = value as Overlays;				
+				
+				var thumbUrl:String = "https://" + S3Endpoint + "/" + bucket;
+				thumbUrl += "/" + Constants.THUMB_PREFIX + _overlay.baseMediaId + Constants.THUMB_EXTENSION; 				
+				imgThumb.source = ImageCacheManager.getInstance().getImageByURL(thumbUrl);
+				imgThumb.load();
+				
+				imgOverlayImage.visible = false;
+				imgOverlay.visible = false
+				swfLoading.visible = true;				
+			}
+			
+			protected function imgThumb_completeHandler(event:Event):void
+			{
+				swfLoading.visible = false;
+				var rect:ResizeRectangle = _imageUtils.getBestFit(event.target.content.width, event.target.content.height, 
+					                                             groupThumb.width, groupThumb.height, false);
+				imgThumb.x = rect.x;
+				imgThumb.y = rect.y;
+				imgThumb.width = rect.width;
+				imgThumb.height = rect.height;
+				
+				imgOverlayImage.visible = true;
+				imgOverlayImage.x = rect.x + 6;
+				imgOverlayImage.y = rect.y + 6;			
+				
+				imgOverlay.visible = true;
+				imgOverlay.x = rect.x + rect.width - imgOverlay.width - 4;
+				imgOverlay.y = rect.y  + rect.height - imgOverlay.height - 4;							
+			}
+
+			
+			protected function itemClickHandler(event:MouseEvent):void
+			{
+				_storyboard.navMedia.navMediaOverlay.itemClick(this);
+			}
+			
+			protected function doubleClickHandler(event:MouseEvent):void
+			{
+				// open the detail
+				_storyboard.navMedia.navMediaOverlay.itemClick(this);
+				
+				if (_appManager.currentUser.type == Constants.USER_TYPE_MANAGER || _overlay.createdBy == _appManager.currentUser.itemName)
+				{
+					_storyboard.navMedia.navMediaOverlay.overlayDetail.editOverlay();
+				}
+			}			
+		]]>
+		</fx:Script>
+	<mx:SWFLoader id="swfLoading" horizontalCenter="2" verticalCenter="-4" width="50%" height="50%" 
+				  source="@Embed('assets/swfs/spinner.swf')" autoLoad="true"/>	
+	<s:Group id="groupThumb" x="0" y="0" width="128" height="86" click="itemClickHandler(event)">
+		<mx:Image id="imgThumb" complete="imgThumb_completeHandler(event)" click="itemClickHandler(event)" />
+		<mx:Image id="imgOverlay" scaleContent="false"  source="@Embed('/assets/images/overlay.png')" click="itemClickHandler(event)" />		
+		<mx:Image id="imgOverlayImage" scaleContent="false"  source="@Embed('/assets/images/overlayImage.png')" click="itemClickHandler(event)" />		
+	</s:Group>	
+	<s:Label text="{_overlay.name}" width="100%" left="0" bottom="0" textAlign="center" maxDisplayedLines="1"/>
+</s:ItemRenderer>

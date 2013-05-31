@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:HGroup xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+		  xmlns:mx="library://ns.adobe.com/flex/mx" height="22" minWidth="150" 
+		  creationComplete="creationCompleteHandler(event)" show="showHandler(event)" gap="0" verticalAlign="middle" xmlns:components="com.stratoscreen.components.*">
+	<fx:Script>
+		<![CDATA[
+			import mx.events.FlexEvent;
+			import mx.utils.StringUtil;
+			
+			import spark.events.TextOperationEvent;
+
+			public static const SEARCH_SEARCH:String = "SEARCH_SEARCH";
+			public static const SEARCH_ADVANCED:String = "SEARCH_ADVANCED";
+			public static const SEARCH_CLEARED:String = "SEARCH_CLEARED";			
+			
+			[Bindable][Embed(source="/assets/icons/magnifier.png")]
+			private var iconSearch:Class;
+			[Bindable][Embed(source="/assets/icons/cross.png")]
+			private var iconClear:Class;
+
+			private var _shown:Boolean = false;
+			private var _clearWidth:Number;
+			
+			public function showClear(display:Boolean):void
+			{
+				if (display)
+				{
+					btnClear.width = _clearWidth;
+					btnClear.visible = true;
+				}
+				else
+				{
+					// Only hide the reset button if the box is empty
+					if (StringUtil.trim(txtSearch.text) == "")
+					{
+						btnClear.width = 0;
+						btnClear.visible = false;
+					}
+				}
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				if (!_shown && btnClear != null) {showHandler(null)}
+
+			}
+
+			protected function showHandler(event:FlexEvent):void
+			{
+				if (!_shown)
+				{
+					_clearWidth = btnClear.width;
+					btnClear.width = 0;
+					btnClear.visible = false;
+					
+					_shown = true;
+				}
+			}
+
+			protected function btnClear_clickHandler(event:MouseEvent):void
+			{
+				btnClear.width = 0;
+				btnClear.visible = false;		
+				txtSearch.text = "";
+				this.dispatchEvent(new Event(SEARCH_CLEARED));
+			}
+
+
+			protected function txtSearch_enterHandler(event:FlexEvent):void
+			{
+				event.preventDefault();
+				event.stopImmediatePropagation();
+			}
+
+			protected function txtSearch_changeHandler(event:TextOperationEvent):void
+			{
+				btnClear.width = _clearWidth;
+				btnClear.visible = true;
+				this.dispatchEvent(new Event(SEARCH_SEARCH));
+			}
+
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<s:TextInput id="txtSearch" width="100%" height="100%" change="txtSearch_changeHandler(event)"
+				 enter="txtSearch_enterHandler(event)" prompt="Search"/>
+	<components:IconButton id="btnClear" click="btnClear_clickHandler(event)" icon="{iconClear}"/>
+</s:HGroup>

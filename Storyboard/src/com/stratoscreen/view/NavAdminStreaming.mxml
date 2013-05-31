@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%"
+					creationComplete="creationCompleteHandler(event)" show="showHandler(event)"  xmlns:components="com.stratoscreen.components.*">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.aws.CFEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.utils.XMLUtils;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+
+			[Bindable][Embed(source="/assets/icons/arrow_refresh.png")]
+			private var iconRefresh:Class;	
+			
+			[Bindable] private var _streaming:Boolean;
+			private var _appManager:AppManager;
+			private var _shown:Boolean = false;
+			
+			
+			public function get isDirty():Boolean
+			{
+				return false;	// Use by the main navigator
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+
+
+			protected function showHandler(event:FlexEvent):void
+			{
+				_streaming = _appManager.currentAccount.streaming == "1";
+				vsMain.selectedIndex = _streaming ? 0 : 1;
+				
+				if (_streaming)
+				{
+					lblDomain.text = _appManager.currentAccount.streamDomain;
+					lblCfId.text = _appManager.currentAccount.cloudFrontId;
+					btnRefresh_clickHandler(null);
+				}
+			}
+
+			private function btnRefresh_clickHandler(event:Event):void
+			{
+				if (_appManager.currentAccount.cloudFrontId == "") {return;}
+				_appManager.cf.getStreamingDistribution(_appManager.currentAccount.cloudFrontId, statusHandler);
+			}
+			
+			private function statusHandler(event:CFEvent):void
+			{
+				if (event.success)
+				{
+					var result:Object = XMLUtils.stringToObject(event.result.toString());
+					lblStatus.text = result.StreamingDistribution.Status;
+					var enabled:Boolean = result.StreamingDistribution.StreamingDistributionConfig.Enabled.toString() == "true";
+					if (!enabled) { lblStatus.text += " - disabled";}
+				}
+	
+			}
+		]]>
+	</fx:Script>
+	<s:BorderContainer width="100%" height="113" styleName="Panel" >
+		<mx:ViewStack id="vsMain" width="100%" height="100%" creationPolicy="all">
+			<s:NavigatorContent>
+				<s:Label x="10" y="10" text="Your account is configured for streaming video and audio." />
+				<components:IconButton id="btnRefresh" icon="{iconRefresh}" toolTip="Refresh data"
+									   click="btnRefresh_clickHandler(event)"  right="5" top="5"/>
+				<s:Label x="10" y="44" text="Stream domain" fontWeight="bold"/>
+				<s:Label id="lblDomain" x="110" y="44" />
+				<s:Label x="10" y="64" text="Stream status" fontWeight="bold"/>
+				<s:Label id ="lblStatus" x="110" y="64" />
+				<s:Label x="10" y="84" text="Stream id" fontWeight="bold"/>
+				<s:Label id ="lblCfId" x="110" y="84" />
+			</s:NavigatorContent>
+			<s:NavigatorContent>
+				<s:RichText left="10" top="10" right="10" bottom="10" >
+					<s:text>Your account is not configured for streaming media. Please contact StratoScreen support to enable this feature for your account. 
+						
+Streaming media can improve the performance for some devices that have limited storage capacity. For example, Google TV, Smart TVs, etc.
+					</s:text>
+				</s:RichText>
+			</s:NavigatorContent>
+		</mx:ViewStack>
+	</s:BorderContainer>
+</s:NavigatorContent>

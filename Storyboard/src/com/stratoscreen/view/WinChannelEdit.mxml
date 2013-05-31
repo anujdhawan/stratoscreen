@@ -1,0 +1,1595 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="com.stratoscreen.components.*" minWidth="950" minHeight="620" 
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)"  title="Edit Channel">
+	<fx:Declarations>
+		<mx:StringValidator id="validName" source="{txtChannelName}" property="text" />
+	</fx:Declarations>	
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.EffectsManager;
+			import com.stratoscreen.model.PlayTimes;
+			import com.stratoscreen.model.ResizeRectangle;
+			import com.stratoscreen.model.domains.*;
+			import com.stratoscreen.model.views.*;
+			import com.stratoscreen.renderers.*;
+			import com.stratoscreen.utils.*;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.Alert;
+			import mx.controls.ToolTip;
+			import mx.events.CloseEvent;
+			import mx.events.CollectionEvent;
+			import mx.events.CollectionEventKind;
+			import mx.events.DataGridEvent;
+			import mx.events.DragEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ItemClickEvent;
+			import mx.events.ListEvent;
+			import mx.events.ToolTipEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.PopUpManager;
+			import mx.managers.ToolTipManager;
+			import mx.utils.ObjectUtil;
+			import mx.utils.StringUtil;
+			
+			import spark.events.IndexChangeEvent;
+
+			private const HEIGHT_PLAYTIMES:int = 48;
+			private const HEIGHT_PLAYTIMES_CUSTOM:int = 104;
+			private const HEIGHT_DURATION:int = 77;
+			private const HEIGHT_GROUP:int = 77;
+			private const HEIGHT_EFFECTS:int = 28;
+			private const HEIGHT_STREAM:int = 28;
+			private const HEIGHT_SPACER:int = 6;
+			
+			[Bindable] private var _channel:Channels;
+			[Bindable] private var _medias:ArrayCollection;
+			[Bindable] private var _groups:ArrayCollection
+			[Bindable] private var _overlays:ArrayCollection;
+			[Bindable] private var _channelOverlays:ArrayCollection;
+			[Bindable] private var _mediaGroupOverlays:ArrayCollection;
+			[Bindable] private var _details:ArrayCollection;
+			[Bindable] private var _audioDetails:ArrayCollection;
+			[Bindable] private var _overlayDetails:ArrayCollection;
+			[Bindable] private var _isDirty:Boolean = false; 
+			[Bindable] private var _selectedItem:ChannelDetail = null;
+			[Bindable] private var _playTimes:ArrayCollection;
+			private var _appManager:AppManager;
+			private var _canceled:Boolean = true;
+			private var _mediasLoaded:Boolean = false;
+			private var _overlaysLoaded:Boolean = false;
+			private var _groupsLoaded:Boolean = false;
+			private var _point:Point;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+				this.enabled = false;
+				borderThumb.visible = false;
+				this.addEventListener(MouseEvent.MOUSE_MOVE, mouseMoveListener);
+				btnSort.addEventListener(TextSortButton.CLICKED, sortButtonHandler);
+				selectMediaTypes.addEventListener(SelectMediaTypes.SELECTION_CHANGE, typeSelectHandler);
+
+				// Hide the side controls by default
+				borderSelected.visible = false;
+				borderPlayTimes.visible = false;	
+				borderPlayTimes.height = 0;
+				borderDuration.visible = false;
+				borderDuration.height = 0;
+				borderEffects.visible = false;
+				borderEffects.height = 0;
+				borderGroup.visible = false;
+				borderGroup.height = 0;
+				borderStream.visible = false;
+				borderStream.height = 0;
+				
+				listMedia.scroller.setStyle("horizontalScrollPolicy", "off");
+				listMediaGroup.scroller.setStyle("horizontalScrollPolicy", "off");
+				listMediaOverlays.scroller.setStyle("horizontalScrollPolicy", "off");
+				
+				mediaDuration.lblMinute.text = "";
+				mediaDuration.lblSecond.text = ":";
+				mediaDuration.stepMinute.toolTip = "Minutes";
+				mediaDuration.stepSecond.toolTip = "Seconds";
+
+				_appManager = this.parentApplication.appManager;
+				_appManager.addEventListener(AppManager.APP_RESIZE, appResizeHandler);
+				_appManager.currentEditWindow = this;
+				searchBox.addEventListener(SearchBox.SEARCH_SEARCH, searchHandler);
+				searchBox.addEventListener(SearchBox.SEARCH_CLEARED, searchClearHandler);
+				
+				_details = new ArrayCollection();
+				_details.filterFunction = filterDeleted;	// Hide the deleted items but pass to the server for deletion
+				_details.addEventListener(CollectionEvent.COLLECTION_CHANGE, detailChangeHandler);				
+
+				_audioDetails = new ArrayCollection();
+				_audioDetails.filterFunction = filterDeleted;	// Hide the deleted items but pass to the server for deletion
+				_audioDetails.addEventListener(CollectionEvent.COLLECTION_CHANGE, audioDetailChangeHandler);				
+
+				_overlayDetails = new ArrayCollection();
+				_overlayDetails.filterFunction = filterDeleted;	// Hide the deleted items but pass to the server for deletion
+				_overlayDetails.addEventListener(CollectionEvent.COLLECTION_CHANGE, overlayDetailChangeHandler);				
+
+				// We need three sets of data. Media, Groups, and Overlays
+				// Usually the Medias have been loaded and held in the Appmanager
+				if (_appManager.medias == null)
+				{
+					var sql:String = "Select * from Medias where accountId='";
+					sql += _appManager.currentUser.accountId + "'";
+					_appManager.sdb.select(sql, loadMediasHandler, Medias);					
+				}	
+				else
+				{
+					this.callLater(setMediasArray);
+				}
+				
+				sql = "Select * from MediaGroups where accountId='";
+				sql += _appManager.currentUser.accountId + "'";
+				_appManager.sdb.select(sql, loadGroupsHandler, MediaGroups);
+
+				sql = "Select * from Overlays where accountId='";
+				sql += _appManager.currentUser.accountId + "'";
+				_appManager.sdb.select(sql, loadOverlaysHandler, Overlays);
+
+				// Create the Channel if it is new. 
+				// This assumes the channel property was set before the window opened
+				if (_channel == null)
+				{
+					_channel = new Channels();
+					_channel.accountId = _appManager.currentAccount.itemName;
+					_channel.createdBy = _appManager.currentUser.itemName;
+				}
+				else
+				{
+					this.enabled = false;
+					sql = "Select * from ChannelDetail where  channelId = '" + _channel.itemName + "'";
+					_appManager.sdb.select(sql, loadDetailHandler, ChannelDetail);
+
+				}
+			}
+			
+			private function appResizeHandler(event:Event):void
+			{
+				this.width = this.parentApplication.width * Constants.EDIT_WINDOW_SIZE;
+				this.height = this.parentApplication.height * Constants.EDIT_WINDOW_SIZE;
+				
+				PopUpManager.centerPopUp(this);
+			}
+			
+			private function loadDetailHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				if (!event.success)
+				{
+					Alert.show("Could not load Channel detail. Please try again later", "Load Error");
+					return;
+				}
+				
+				// The order is important. Use a temp array to rebuild the items
+				var results:ArrayCollection = new ArrayCollection(event.result as Array);
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("orderInt", false, false, true)];
+				results.sort = sort;
+				results.refresh();
+				
+				for each (var detail:ChannelDetail in results)
+				{
+					detail.updated = true;	// Make sure the order is always writen
+					
+					if (detail.audioTrack == "1")			// This is an audio item
+					{
+						_audioDetails.addItem(detail);
+					}
+					else if (detail.channelOverlay == "1")	// A channel overlay
+					{
+						_overlayDetails.addItem(detail);
+					}
+					else		// Lastly, it has to be a regular channel item
+					{
+						_details.addItem(detail);
+					}
+				}				
+				_isDirty = false;	// Reset the flag
+			}
+
+			protected function closeHandler(event:Event):void
+			{
+				var closeWindow:Boolean;
+				
+				if (event == null)
+				{
+					// This was called directly from the program
+					closeWindow = true;
+					
+					// Broadcast a new event. The parent will be listening
+					if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE, false, false, Alert.YES));}
+				}
+				else  
+				{
+					switch (CloseEvent(event).detail)
+					{
+						case Alert.NO:
+							closeWindow = false;
+							break;
+						
+						case Alert.YES:
+							closeWindow = true;
+							break;
+						
+						default:
+							closeWindow = !_isDirty
+							if (_isDirty) {Alert.show("Do you want to close window?", "Close Window", Alert.YES | Alert.NO, null, closeHandler, null, Alert.NO);}
+					}
+				}
+				
+				if (closeWindow) {PopUpManager.removePopUp(this);}				
+			}
+
+
+			public function get canceled():Boolean
+			{
+				return _canceled;
+			}
+			
+			public function set channel(value:Channels):void
+			{
+				if (value == null)
+				{
+					_channel = null;					
+				}
+				else
+				{
+					_channel = Utils.copyClassObject(Channels, value);
+				}
+			}
+			
+			public function get channel():Channels
+			{
+				return _channel;
+			}
+			
+			private function mouseMoveListener(event:MouseEvent):void
+			{
+				_point = new Point(event.stageX , event.stageY);	// Fix hard coding
+			}
+			
+			public function showImage(value:Object):void
+			{
+				var bmpData:BitmapData = value.thumbBmpdata;
+				if (bmpData == null) {return;}
+				if (_point == null) {return;}	// hmmm. WOnder why this happened
+				
+				
+				// If the image is bigger than the zie alloted then skip the magnified view
+				if (bmpData.height <= 18 && bmpData.width <=30)	// Fix hard code
+				{
+					return;
+				}
+				
+				var rect:ResizeRectangle = ImageUtils.reSizetoMax(bmpData.width, bmpData.height);
+				imgThumb.source = new Bitmap(bmpData);
+				imgThumb.width = rect.width;
+				imgThumb.height = rect.height;
+				borderThumb.x = _point.x;
+				borderThumb.y = _point.y;
+				borderThumb.visible = true;
+				
+				// We have to guess what side is being moused over. 
+				// We want the images to the left of the grid if on the right
+				borderThumb.y -= 60;	// Fix the hard code
+				borderThumb.x = 50; 	// Fix hardcoding				
+			}
+			
+			public function hideImage():void
+			{
+				borderThumb.visible = false;
+			}			
+			
+			public function itemClick(id:String):void
+			{
+				// Retro fit this into the window
+				// find the matching detail and 
+				for (var i:int = 0; i < _details.length; i++)
+				{
+					if (_details[i].itemName == id)
+					{
+						selectItem(_details[i]);
+						return;
+					}
+				}
+
+				for (i= 0; i < _audioDetails.length; i++)
+				{
+					if (_audioDetails[i].itemName == id)
+					{
+						selectItem(_audioDetails[i]);
+						return;
+					}
+				}
+
+				for (i= 0; i < _overlayDetails.length; i++)
+				{
+					if (_overlayDetails[i].itemName == id)
+					{
+						selectItem(_overlayDetails[i]);
+						return;
+					}
+				}
+			}
+			
+			public function selectItem(detail:ChannelDetail):void
+			{
+				// Update any lingering values before we switch
+				updateSelectedItem();
+				
+				_selectedItem = detail;
+				stepOrder.maximum = _details.length + 1;
+				stepOrder.value = getSelectedItemOrder() + 1;
+				
+				// Show the side control 
+				if (!borderSelected.visible)
+				{
+					borderSelected.visible = true;
+					borderPlayTimes.visible = true;
+				}
+				
+				// Set up the playtimes for the current item
+				_playTimes = new ArrayCollection(_selectedItem.playTimesArray);
+				_playTimes.filterFunction = filterDeleted;
+							
+				// Flip the blankRow flag or this will not save property
+				for each (var playTime:PlayTimes in _playTimes)
+				{
+					if ( StringUtil.trim(playTime.startTime) == "" && StringUtil.trim(playTime.endTime) == "")
+					{
+						playTime.blankRow = true;
+					}
+					else
+					{
+						playTime.blankRow = false;
+					}
+				}
+				
+				if (_playTimes.length == 0)	
+				{
+					chkPlayTimes.selected = true;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES;
+					gridTimes.visible = false;
+				}
+				else
+				{
+					chkPlayTimes.selected = false;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES_CUSTOM;
+					gridTimes.visible = true;
+					
+				}			
+				addBlankRow();
+				
+				for ( i = 0; i < ddEffect.dataProvider.length; i++)
+				{
+					if (detail.effectId == ddEffect.dataProvider[i].value)
+					{
+						ddEffect.selectedIndex = i;
+						break;
+					}
+				}				
+				
+				// Display the other panels based on the Media type
+				switch (_selectedItem.type)
+				{
+					case ChannelDetail.TYPE_MEDIA:
+						borderDuration.visible = true;
+						borderDuration.height = HEIGHT_DURATION;
+						borderEffects.visible = _selectedItem.accelerated == "1" ? false : true;
+						borderEffects.height = _selectedItem.accelerated == "1" ? 0 : HEIGHT_EFFECTS;
+						borderGroup.visible = false; 
+						borderGroup.height = 0;
+						
+						mediaDuration.duration = parseInt(_selectedItem.duration);
+						chkToEnd.selected = (mediaDuration.duration <= 0);
+						mediaDuration.enabled = !chkToEnd.selected; 												
+						
+						// Images need a duration
+						vsOptions.selectedIndex = 0;
+						chkToEnd.enabled = true;
+						if (getMediaType(_selectedItem.mimeType) == Constants.MEDIA_TYPE_IMAGE)
+						{
+							chkToEnd.enabled = false;
+							mediaDuration.enabled = true;
+							if (mediaDuration.duration <= 0) 
+							{
+								mediaDuration.duration = parseInt(_appManager.currentAccount.defaultDuration);
+								_selectedItem.duration = _appManager.currentAccount.defaultDuration;
+							}
+						}			
+						
+						// SWFs can be tracked by frame #
+						if (getMediaType(_selectedItem.mimeType) == Constants.MEDIA_TYPE_SWF)
+						{
+							vsOptions.selectedIndex = 1;				
+							
+							var frames:int = parseInt(_selectedItem.frames);
+							txtToFrame.text = frames.toString();
+							chkToFrame.selected = (frames > 0 && _selectedItem.accelerated != "1");
+							mediaDuration.enabled = !chkToFrame.selected;		
+							
+							chkToFrame.enabled = _selectedItem.accelerated != "1";
+						}
+						
+						// Transitition effects are not allowed for video
+						if (getMediaType(_selectedItem.mimeType) == Constants.MEDIA_TYPE_AUDIO || 
+							getMediaType(_selectedItem.mimeType) == Constants.MEDIA_TYPE_VIDEO)
+						{
+							borderEffects.height = 0;
+							borderEffects.visible = false;
+
+							// Turn of the stream if needed
+							if (_appManager.currentAccount.streaming == "1" && _selectedItem.canStream == "1")
+							{
+								borderStream.height = HEIGHT_STREAM;
+								borderStream.visible = true; 
+								chkStream.selected = _selectedItem.stream == "1";
+							}
+							else
+							{
+								borderStream.height = 0;
+								borderStream.visible = false; 
+								chkStream.selected = _selectedItem.stream == "0";								
+							}
+						}
+						break;
+					
+					case ChannelDetail.TYPE_GROUP:
+						borderDuration.visible = false;
+						borderDuration.height = 0;
+						borderEffects.visible = false;
+						borderEffects.height = 0;
+						borderGroup.visible = true; 												
+						borderGroup.height = HEIGHT_GROUP;
+						borderStream.visible = false;
+						borderStream.height = 0;
+			
+						stepPlayCount.value = parseInt(_selectedItem.playCount);
+						chkPlayAll.selected = _selectedItem.playAll == "1";
+						
+						for (var i:int = 0; i < ddGroupType.dataProvider.length; i++)
+						{
+							if (ddGroupType.dataProvider[i].value == _selectedItem.groupType)
+							{
+								ddGroupType.selectedIndex = i;
+								break;
+							}
+						}						
+						break;
+					
+					case ChannelDetail.TYPE_GROUP_OVERLAY:
+						borderDuration.visible = true;	// Same for the duration.
+						borderDuration.height = HEIGHT_DURATION;
+						borderEffects.visible = false;
+						borderEffects.height = 0;
+						borderGroup.visible = false;	// Even though this is a group we will not allow them to override 												
+						borderGroup.height = 0;
+						borderStream.visible = false;
+						borderStream.height = 0;
+
+						mediaDuration.duration = parseInt(_selectedItem.duration);
+						chkToEnd.selected = (mediaDuration.duration <= 0);
+						mediaDuration.enabled = !chkToEnd.selected; 												
+						break;
+					
+					case ChannelDetail.TYPE_OVERLAY:
+						borderDuration.visible = true;
+						borderDuration.height = HEIGHT_DURATION;
+						borderEffects.visible = detail.channelOverlay == "1" ? false : true;
+						borderEffects.height = detail.channelOverlay == "1" ? 0 : HEIGHT_EFFECTS;
+						borderGroup.visible = false; 												
+						borderGroup.height = 0;
+						borderStream.visible = false;
+						borderStream.height = 0;
+
+						// Set the duration. We'll have to skip error checking on 
+						// invalid durations
+						vsOptions.selectedIndex = 0;
+						mediaDuration.duration = parseInt(_selectedItem.duration);
+						txtToFrame.text = _selectedItem.frames;
+						var selectedItemDuration:int = parseInt(_selectedItem.duration);
+						var selectedItemFrames:int = parseInt(_selectedItem.frames);
+						
+						chkToEnd.selected =  selectedItemDuration + selectedItemFrames <=0;	// Sloppy but it works
+						chkToEnd.enabled = detail.channelOverlay != "1";
+						chkToFrame.selected = parseInt(_selectedItem.frames) > 0;
+						if (chkToFrame.selected) {vsOptions.selectedIndex = 1;}
+						mediaDuration.enabled = !chkToEnd.selected && !chkToFrame.selected; 
+						break;	
+				}
+			}				
+
+			public function deleteItem(detail:ChannelDetail):void
+			{
+				for (var i:int = 0; i < _details.source.length; i++)
+				{
+					if (_details.source[i].itemName == detail.itemName)	
+					{
+						_details.source[i].deleted = true;
+						_details.source[i].updated = false;
+						_details.refresh();
+						_isDirty = true;
+						break;
+					}
+				}
+
+				for (i = 0; i < _audioDetails.source.length; i++)
+				{
+					if (_audioDetails.source[i].itemName == detail.itemName)	
+					{
+						_audioDetails.source[i].deleted = true;
+						_audioDetails.source[i].updated = false;
+						_audioDetails.refresh();
+						_isDirty = true;
+						break;
+					}
+				}
+
+				for (i = 0; i < _overlayDetails.source.length; i++)
+				{
+					if (_overlayDetails.source[i].itemName == detail.itemName)	
+					{
+						_overlayDetails.source[i].deleted = true;
+						_overlayDetails.source[i].updated = false;
+						_overlayDetails.refresh();
+						_isDirty = true;
+						break;
+					}
+				}
+
+				hideSideEdit();		
+			}
+			
+			public function removeItemById(id:String):void
+			{
+				for (var i:int = 0; i < _overlayDetails.source.length; i++)
+				{
+					if (_overlayDetails.source[i].itemName == id)	
+					{
+						_overlayDetails.source[i].deleted = true;
+						_overlayDetails.source[i].updated = false;
+						_overlayDetails.refresh();
+						_isDirty = true;
+						break;
+					}
+				}
+				
+				hideSideEdit();
+			}
+			
+			private function hideSideEdit():void
+			{
+				// Clear the selection 
+				_selectedItem = null;
+				borderSelected.visible = false;
+				borderPlayTimes.visible = false;	
+				borderPlayTimes.height = 0;
+				borderDuration.visible = false;
+				borderDuration.height = 0;		
+				borderEffects.visible = false;
+				borderEffects.height = 0;
+				borderGroup.visible = false; 												
+				borderGroup.height = 0;	
+				borderStream.visible = false;
+				borderStream.height = 0;
+			}
+			
+			public function addMediaItem(media:Medias):void
+			{
+				// Assume the user wants to add media to the media track
+				if (media.mediaType == Constants.MEDIA_TYPE_AUDIO)
+				{
+					_audioDetails.addItem(media);	
+				}
+				else
+				{
+					_details.addItem(media);
+				}
+				_isDirty = true;
+			}
+			
+			public function addMediaGroupItem(group:MediaGroups):void
+			{
+				// Assume the user wants to add media to the media track
+				if (group.audioOnlyBool)
+				{
+					_audioDetails.addItem(group);						
+				}
+				else
+				{
+					_details.addItem(group);
+				}
+				_isDirty = true;
+			}
+			
+			public function addMediaOverlayItem(overlay:Overlays):void
+			{
+				_details.addItem(overlay);
+				_isDirty = true;
+			}
+
+			public function addMediaGroupOverlayItem(overlay:Overlays):void
+			{
+				_details.addItem(overlay);
+				_isDirty = true;
+			}
+
+			public function addChannelOverlayItem(overlay:Overlays):void
+			{
+				_overlayDetails.addItem(overlay);
+				_isDirty = true;
+			}
+			
+			
+			private function setMediasArray():void
+			{
+				_mediasLoaded = true;
+				this.enabled = _mediasLoaded && _overlaysLoaded && _groupsLoaded;
+				
+				_medias = new ArrayCollection();
+				_medias.source = _appManager.medias;
+				_medias.filterFunction = filterMedia;
+				
+				// Default to an alphabetic sort
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name")];
+				_medias.sort = sort;
+				_medias.refresh();				
+			}
+
+			private function loadMediasHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					Alert.show("Could not load Media Groups. Please try again later", "Load Error");
+					return;
+				}
+				
+				// Store in AppManager. Odds are we will always need it
+				_appManager.medias = event.result as Array;
+				setMediasArray()	
+			}
+			
+			private function loadGroupsHandler(event:SDBEvent):void
+			{
+				_groupsLoaded = true;
+				this.enabled = _mediasLoaded && _overlaysLoaded && _groupsLoaded;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not load Media Groups. Please try again later", "Load Error");
+					return;
+				}
+				
+				_groups = new ArrayCollection();
+				_groups.source = event.result as Array;	
+				_groups.filterFunction = filterMedia;
+				
+				// Default to a sort by name
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name", true)];				
+				_groups.sort = sort;
+				_groups.refresh();		
+			}
+			
+			private function loadOverlaysHandler(event:SDBEvent):void
+			{
+				_overlaysLoaded = true;
+				this.enabled = _mediasLoaded && _overlaysLoaded && _groupsLoaded;
+				
+				if (!event.success)
+				{
+					Alert.show("Could not load Overlays. Please try again later", "Load Error");
+					return;
+				}
+				
+				// We have two different overlays, media and Channel. Seperate the two 
+				// into different arrays				
+				_overlays = new ArrayCollection();
+				_overlays.filterFunction = filterMedia;
+				_mediaGroupOverlays = new ArrayCollection();
+				_mediaGroupOverlays.filterFunction = filterMedia;
+				_channelOverlays = new ArrayCollection();
+				_channelOverlays.filterFunction = filterMedia;
+
+				for (var i:int = 0; i < event.result.length; i++)
+				{
+					var overlay:Overlays = event.result[i] as Overlays;
+					if (overlay.type == Overlays.TYPE_MEDIA) {_overlays.addItem(overlay);}
+					if (overlay.type == Overlays.TYPE_MEDIA_GROUP) {_mediaGroupOverlays.addItem(overlay);}
+					if (overlay.type == Overlays.TYPE_CHANNEL) {_channelOverlays.addItem(overlay);}
+				}
+				
+				// Default to a sort by name
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name", true)];				
+				_overlays.sort = sort;
+				_overlays.refresh();
+				_mediaGroupOverlays.sort = sort;
+				_mediaGroupOverlays.refresh();
+				_channelOverlays.sort = sort;
+				_channelOverlays.refresh();		
+			}
+
+			private function detailChangeHandler(event:CollectionEvent):void
+			{
+				if (event.kind == CollectionEventKind.ADD || event.kind == CollectionEventKind.REMOVE)
+				{
+					// Convert the Objects to ChannelDetail if needed
+					this.callLater(convertObjects, [_details]);
+				}
+			}
+			
+			private function audioDetailChangeHandler(event:CollectionEvent):void
+			{
+				if (event.kind == CollectionEventKind.ADD || event.kind == CollectionEventKind.REMOVE)
+				{
+					// Convert the Objects to ChannelDetail if needed
+					this.callLater(convertObjects, [_audioDetails]);
+				}
+			}
+			
+			private function overlayDetailChangeHandler(event:CollectionEvent):void
+			{
+				if (event.kind == CollectionEventKind.ADD || event.kind == CollectionEventKind.REMOVE)
+				{
+					// Convert the Objects to ChannelDetail if needed
+					this.callLater(convertObjects, [_overlayDetails]);
+				}
+			}
+			
+			private function convertObjects(array:ArrayCollection):void
+			{
+				for (var i:int = 0; i < array.length; i++)
+				{
+					if (!(array[i] is ChannelDetail))
+					{
+						var detail:ChannelDetail = new ChannelDetail();
+						detail.accountId = _appManager.currentAccount.itemName;
+						detail. channelId = _channel.itemName;
+						detail.name = array[i].name;
+						
+						// Flag the ChannelDetail for Background Music or Channel Overlay
+						detail.audioTrack = array == _audioDetails ? "1" : "0";
+						detail.channelOverlay = array == _overlayDetails ? "1" : "0";							
+												
+						// We are going to Guess the best we can on what items were dropped
+						// into the channel
+						var properties:Array = new Array();
+						var classInfo:Object = ObjectUtil.getClassInfo(array[i]);
+						for each (var item:Object in classInfo.properties)
+						{
+							// Only save Strings because that is what AWS stores
+							properties[item.localName] = true;	// Just something to avoid a null
+						}		
+						
+						// Media							
+						if (properties["mimeType"] != null && properties["size"] != null )
+						{
+							detail.type = ChannelDetail.TYPE_MEDIA;
+							detail.mediaId = array[i].itemName;
+							detail.firstMediaId = array[i].itemName;
+							detail.mediaType = getMediaType(array[i].mimeType);
+							detail.mimeType = array[i].mimeType;
+							detail.duration = array[i].duration;
+							detail.frames = array[i].frames;		
+							detail.width = array[i].width;
+							detail.height = array[i].height;
+							detail.effectId = _appManager.currentAccount.defaultEffectId;
+							detail.canStream = array[i].canStream;
+							detail.stream = "0";	// Default to not streaming
+							detail.accelerated = array[i].accelerated;
+						}	
+						
+						// Media Group
+						else if (properties["playCount"] != null && properties["playAll"] && properties["firstMediaId"] != null)
+						{
+							detail.type = ChannelDetail.TYPE_GROUP;
+							detail.mediaId = array[i].itemName;
+							detail.firstMediaId = array[i].firstMediaId;
+							detail.groupType = array[i].type;
+							detail.playAll = array[i].playAll;
+							detail.playCount = array[i].playCount;
+							detail.playOrder = array[i].playOrder;
+							detail.effectId = "";
+						}
+							
+						// Media Overlay or Media Group Overlay
+						else if (properties["baseMediaId"] != null)
+						{
+							// Check to see if this is a Media Overlay or a Media Group overlay
+							var isMediaGroupOverlay:Boolean = false;
+							if (properties["baseMediaId"] != null)
+							{
+								isMediaGroupOverlay = array[i]["baseMediaGroupId"] != null && array[i]["baseMediaGroupId"] != "";
+							}
+							
+							if (isMediaGroupOverlay)
+							{
+								detail.type = ChannelDetail.TYPE_GROUP_OVERLAY;
+								detail.mediaGroupId = array[i].baseMediaGroupId;
+								detail.groupType = array[i].groupType;
+								detail.playAll = array[i].playAll;
+								detail.playCount = array[i].playCount;
+								detail.playOrder = array[i].playOrder;
+							}
+							else
+							{
+								detail.type = ChannelDetail.TYPE_OVERLAY;		
+								detail.mediaGroupId = "";
+							}
+							
+							detail.mediaId = array[i].itemName;
+							detail.firstMediaId = array[i].baseMediaId;
+							detail.effectId = _appManager.currentAccount.defaultEffectId;
+							detail.duration = array[i].duration;
+							detail.width = array[i].width;
+							detail.height = array[i].height;
+						}
+						
+
+
+						else
+						{
+							// Remove the only unknown media 
+							LogUtils.writeToLog("Unexpected type");
+							array.removeItemAt(i);
+							convertObjects(array)
+							return;
+						}	
+						
+						// Replace the object with the corrected ChannelDetail Object
+						array.addItemAt(detail, i);
+						array.removeItemAt(i + 1);
+						return;	// The detailChangeHandler function will recall this function until the array is clean						
+					}
+				}
+			}
+			
+			private function convertAudioObjects():void
+			{
+				
+			}
+			
+			private function updateSelectedItem():void
+			{
+				if  (_selectedItem == null) {return;}
+				
+				_selectedItem.duration = mediaDuration.duration.toString();
+				if (chkPlayTimes.selected)
+				{
+					_selectedItem.playTimes = "";
+				}
+				else
+				{
+					_selectedItem.playTimesArray = _playTimes.source;
+				}
+				
+				if (_selectedItem.type == ChannelDetail.TYPE_GROUP)
+				{
+					_selectedItem.groupType = ddGroupType.selectedItem.value;
+					_selectedItem.playAll = chkPlayAll.selected ?  "1" : "0";
+					_selectedItem.playCount = chkPlayAll.selected ? "0" : stepPlayCount.value.toString();
+				}
+				
+				if (chkToEnd.selected) {_selectedItem.duration = "0";}
+				if (!chkToFrame.selected) {_selectedItem.frames = "0";}
+			}
+			
+			private function filterMedia(item:Object):Boolean
+			{
+				if (item.deleted) {return false;}
+				try
+				{
+					if (!item.uploaded) {return false;} // Cannot work with files until they are uploaded
+				}
+				catch (err:Error) 
+				{ /* Ignore Errors. */}
+				
+				// Check the Filter types
+				if (item is Medias)
+				{
+					switch (item.mediaType)
+					{
+						case Constants.MEDIA_TYPE_AUDIO:
+							if (!selectMediaTypes.audioSelected) {return false;}
+							break;
+						
+						case Constants.MEDIA_TYPE_IMAGE:
+							if (!selectMediaTypes.imagesSelected) {return false;}
+							break;
+						
+						case Constants.MEDIA_TYPE_SWF:
+							if (!selectMediaTypes.swfsSelected) {return false;}
+							break;
+						
+						case Constants.MEDIA_TYPE_VIDEO:
+							if (!selectMediaTypes.videoSelected) {return false;}
+							break;
+					}				
+				}
+				
+				var itemName:String = item.name.toLowerCase();
+				var searchText:String = searchBox.txtSearch.text.toLowerCase();
+				searchText = StringUtil.trim(searchText);
+				
+				return itemName.indexOf(searchText) >= 0;
+			}
+			
+			private function filterDeleted(item:Object):Boolean
+			{
+				return !item.deleted;
+			}
+			
+			private function searchClearHandler(event:Event):void
+			{
+				// Reset the filter too
+				btnFilter.selected = false;
+				selectMediaTypes.reset();
+				searchHandler(null);
+			}
+			
+			private function searchHandler(event:Event):void
+			{
+				if (_medias != null) {_medias.refresh();}
+				if (_groups != null) {_groups.refresh();}
+				if (_overlays != null) {_overlays.refresh();}
+			}
+			
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				var result:ValidationResultEvent = validName.validate();
+				if (result.results != null)  
+				{
+					// Show the Alert. It is kinda hard to read
+					Alert.show(result.message, "Invalid Channel Name");
+					return;
+				}
+				
+				if (_details.length == 0)
+				{
+					// Show the Alert. It is kinda hard to read
+					Alert.show("At least one media must be added to the Channel", "Invalid Channel Detail");
+					return;					
+				}
+				
+				// Validate the detail
+				// Also update the sorting while here
+				updateSelectedItem();
+				var order:int = 0;
+				var saveDetails:Array = new Array;
+				
+				// Loop three times. One for each array, channel detail, background audio, and channel layers
+				for (var i:int = 0; i < 3; i++)
+				{
+				
+					var array:ArrayCollection;
+					switch (i)
+					{
+						case 0:
+							array = _details;
+							break;
+						
+						case 1: 
+							array = _audioDetails;
+							break;
+						
+						case 2:
+							array = _overlayDetails;
+							break;
+					}
+				
+					for each (var detail:ChannelDetail in array)
+					{
+						for each (var playTime:PlayTimes in detail.playTimesArray)
+						{
+							if ( StringUtil.trim(playTime.startTime) == "" && StringUtil.trim(playTime.endTime) == "")
+							{
+								// This is OK
+							}
+							else if ( StringUtil.trim(playTime.startTime) == "" || StringUtil.trim(playTime.endTime) == "")
+							{
+								// Adjust the time. Assume blank that it is the beginning
+								if (StringUtil.trim(playTime.startTime) == "") {playTime.startTime = "00:00:00";}	
+								if (StringUtil.trim(playTime.endTime) == "") {playTime.endTime = "23:59:59";}
+							}
+							else
+							{
+								// Validate what we have
+								if (!DateUtils.isTime(playTime.startTime) || !DateUtils.isTime(playTime.endTime))
+								{
+									Alert.show("Invalid time found in " + detail.name, "Invalid Time");
+									return;
+								}
+								
+								if (!playTime.datesInSequence())
+								{
+									Alert.show("Invalid time time range in " + detail.name, "Invalid Time");
+									return;									
+								}
+							}
+							
+						}
+						
+						// Overlays must have a length
+						if (i == 2)	// Checking the overlay detail array
+						{
+							if (detail.duration == "0")
+							{
+								Alert.show("Invalid duration found in " + detail.name + ".\r\nChannel Overlays must have a duration.", "Invalid Duration");
+								return;
+							}
+						}
+						
+						// Update the order  
+						order ++;
+						detail.order = order.toString();
+						
+						// Create a new array to make sure we are sorted properly
+						saveDetails.push(detail);
+					}
+				}
+				
+				// Also pass along the deleted items
+				// Note. _details is an ArrayCollection and will not show the delete items. Use the source instead
+				for each (detail in _details.source)
+				{
+					if (detail.deleted) {saveDetails.push(detail);}
+				}
+				for each (detail in _audioDetails.source)
+				{
+					if (detail.deleted) {saveDetails.push(detail);}
+				}
+				for each (detail in _overlayDetails.source)
+				{
+					if (detail.deleted) {saveDetails.push(detail);}
+				}
+
+				// Update any last minute items
+				_channel.firstMediaId = _details[0].firstMediaId;
+				_channel.modifiedDate = new Date();
+				_channel.modifiedBy = _appManager.currentUser.itemName;
+				_channel.updated = true;
+				
+				// Save the detail first, just in case we fail in between
+				_appManager.sdb.updateDomain(saveDetails, channelDetailUpdateHandler);
+				_canceled = false;
+				this.enabled = false;
+			}
+			
+			private function channelDetailUpdateHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					this.enabled = true;
+					Alert.show("Could not update the channel Detail. Please try again later.", "Update Error");
+					return;
+				}
+				
+				_appManager.sdb.updateDomain([_channel], channelUpdateHandler);				
+			}
+
+			private function channelUpdateHandler(event:SDBEvent):void
+			{
+				if (!event.success)
+				{
+					this.enabled = true;
+					Alert.show("Could not update the Channel. Please try again later.", "Update Error");
+					return;
+				}
+				
+				_canceled = false;
+				closeHandler(null);
+			}
+
+			private function getMediaType(mimeType:String):String
+			{
+				if (mimeType.indexOf("image") >= 0)
+				{
+					return Constants.MEDIA_TYPE_IMAGE;
+				} 
+				else if (mimeType.indexOf("application/x-shockwave-flash") >= 0)
+				{
+					return Constants.MEDIA_TYPE_SWF;
+				}
+				else if (mimeType.indexOf("video") >= 0)
+				{
+					return Constants.MEDIA_TYPE_VIDEO;			
+				}
+				else if (mimeType.indexOf("audio") >= 0)
+				{
+					return Constants.MEDIA_TYPE_AUDIO;			
+				}
+				
+				// Hmmmm. Mystery Media...
+				return "";			
+			}			
+
+			private function getSelectedItemOrder():int
+			{
+				// Determine waht array we are workig with
+				var array:ArrayCollection;
+				if (_selectedItem.audioTrack == "1")
+				{
+					array = _audioDetails;
+				}
+				else if (_selectedItem.channelOverlay == "1")
+				{
+					array = _overlayDetails;
+				}
+				else
+				{
+					array = _details;
+				}
+
+				for (var i:int = 0; i < array.length; i++)
+				{
+					if (array[i].itemName == _selectedItem.itemName)	{return i;}
+				}
+				
+				return -1;
+			}
+
+			protected function stepOrder_changeHandler(event:Event):void
+			{
+				// Determine waht array we are workig with
+				var array:ArrayCollection;
+				if (_selectedItem.audioTrack == "1")
+				{
+					array = _audioDetails;
+				}
+				else if (_selectedItem.channelOverlay == "1")
+				{
+					array = _overlayDetails;
+				}
+				else
+				{
+					array = _details;
+				}
+					
+				if (stepOrder.value > array.length) 
+				{
+					stepOrder.value = array.length;
+					return;
+				}
+				
+				// remove from the details and readd
+				var beforeIndex:int;
+				for (var i:int = 0; i < array.length; i++)
+				{
+					if (array[i].itemName == _selectedItem.itemName)	
+					{
+						beforeIndex = i;
+						array.removeItemAt(i);
+					}
+				}
+				
+				// Allow the system to perform the remove
+				var afterIndex:int = stepOrder.value - 1;
+				this.callLater(reAddItem, [array, afterIndex]);
+			}
+			
+			private function reAddItem(array:ArrayCollection, index:int):void
+			{
+				array.addItemAt(_selectedItem, index);
+				_isDirty = true;
+			}
+
+			protected function chkPlayTimes_clickHandler(event:MouseEvent):void
+			{
+				if (chkPlayTimes.selected)
+				{
+					gridTimes.visible = false;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES;
+				}
+				else
+				{
+					gridTimes.visible = true;
+					borderPlayTimes.height = HEIGHT_PLAYTIMES_CUSTOM;					
+				}
+			}
+
+			protected function gridTimes_itemClickHandler(event:ListEvent):void
+			{
+				gridTimes.errorString = "";						
+				
+				// The update or delete was clicked
+				if (event.columnIndex == 2)
+				{
+					var playTime:PlayTimes = event.itemRenderer.data as PlayTimes;
+					
+					if (!playTime.blankRow)
+					{
+						playTime.deleted = true;
+						_playTimes.refresh();
+					}					
+				}
+				
+				// Make sure we have a row we an edit
+				addBlankRow();
+			}
+
+			protected function gridTimes_itemEditEndHandler(event:DataGridEvent):void
+			{				
+				_isDirty = true;
+				event.itemRenderer.data.blankRow = false;
+				addBlankRow();
+			}
+			
+			private function addBlankRow():void
+			{
+				// We may need to add a new row to the collection.
+				var blankRowFound:Boolean = false;
+				for each(var playTime:PlayTimes in _playTimes)
+				{
+					if ( StringUtil.trim(playTime.startTime) == "" && StringUtil.trim(playTime.endTime) == "")
+					{
+						playTime.blankRow = true;
+						blankRowFound = true;
+						break;
+					}
+				}
+				
+				if (!blankRowFound) {_playTimes.addItemAt(new PlayTimes(), _playTimes.length );}
+			}			
+
+			protected function chkToEnd_changeHandler(event:Event):void
+			{
+				_isDirty = true;
+				mediaDuration.enabled = !chkToEnd.selected;
+			}
+			
+			protected function chkToFrame_changeHandler(event:Event):void
+			{
+				_isDirty = true;
+				mediaDuration.enabled = !chkToFrame.selected;
+			}			
+			
+			protected function ddGroupType_changeHandler(event:IndexChangeEvent):void
+			{
+				_isDirty = true;
+			}
+
+
+			protected function stepPlayCount_changeHandler(event:Event):void
+			{
+				_isDirty = true;
+			}
+
+
+			protected function chkPlayAll_clickHandler(event:MouseEvent):void
+			{
+				{_isDirty = true;}				
+			}
+
+
+			protected function ddEffect_changeHandler(event:IndexChangeEvent):void
+			{
+				_isDirty = true;
+				_selectedItem.effectId = ddEffect.selectedItem.value;
+			}
+			
+			private function sortButtonHandler(event:Event):void
+			{
+				if (_medias == null) {return;}
+				
+				// Default to an alphabetic sort
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name",true, btnSort.selected)];
+				
+				if (_medias != null)
+				{
+					_medias.sort = sort;
+					_medias.refresh()
+				}
+				
+				if (_groups != null)
+				{
+					_groups.sort = sort;
+					_groups.refresh()
+					
+				}
+
+				if (_overlays != null)
+				{
+					_overlays.sort = sort;
+					_overlays.refresh()
+					
+				}
+			}
+			
+			private function typeSelectHandler(event:Event):void
+			{
+				searchBox.showClear(!selectMediaTypes.allSelected);
+				_medias.refresh();
+			}
+
+			protected function listAudio_dragEnterHandler(event:DragEvent):void
+			{
+				// Only Allow Audio to be dropped here
+				var selectedItem:Object = Object(event.relatedObject).selectedItem;
+				if (selectedItem is Medias)
+				{
+					event.target.dropEnabled = Medias(selectedItem).mediaType == Constants.MEDIA_TYPE_AUDIO;
+					return;
+				}	
+				else if (selectedItem is MediaGroups)
+				{
+					event.target.dropEnabled = MediaGroups(selectedItem).audioOnlyBool;
+					return;
+				}	
+				else if (selectedItem is ChannelDetail)
+				{
+					event.target.dropEnabled = ChannelDetail(selectedItem).audioTrack == "1";
+					return;					
+				}
+				else
+				{
+					
+				}
+									
+				// All the test failed
+				event.target.dropEnabled = false;
+			}
+
+			protected function linkBar_itemClickHandler(event:ItemClickEvent):void
+			{
+
+				var label:String;
+				switch (event.index)
+				{
+					case 0:
+						label = "Media";
+						break;
+
+					case 1:
+						label = "Media Overlays";
+						break;
+
+					case 2:
+						label = "Media Groups";
+						break;
+
+					case 3:
+						label = "Media Group Overlays";
+						break;
+
+					case 4:
+						label = "Channel Overlays";
+						break;
+				}
+
+				for (var i:int = 0; i <  vsMedia.numElements; i++)
+				{
+					var nav:NavigatorContent = vsMedia.getElementAt(i) as NavigatorContent; 
+					nav.label = (i == event.index) ? label : "";
+				}
+				
+			}
+
+			protected function listChannelOverlays_dragEnterHandler(event:DragEvent):void
+			{
+				// Only allow from Channel overlay list and rearranging its ow contents
+				event.target.dropEnabled = event.dragInitiator == listChannelOverlays || event.dragInitiator == listOverlays;
+			}
+
+
+			protected function listGroup_dragEnterHandler(event:DragEvent):void
+			{
+				// Allow anything expect channel overlays
+				if (event.dragInitiator == listChannelOverlays || event.dragInitiator == listOverlays)
+				{
+					event.target.dropEnabled = false
+				}
+				else
+				{
+					event.target.dropEnabled = true;
+				}
+			}
+
+
+			protected function chkStream_clickHandler(event:MouseEvent):void
+			{
+				_isDirty = true;
+				_selectedItem.stream = chkStream.selected ? "1" : "0";
+			}
+
+		]]>
+	</fx:Script>
+	<s:VGroup id="groupLeft" width="275" left="5" top="5" bottom="5" horizontalAlign="center">
+		<s:BorderContainer styleName="Main" width="100%" height="45" dropShadowVisible="true">
+			<s:Label text="Name" left="5" top="5" fontWeight="bold"/>
+			<s:TextInput y="18" left="5" right="5" id="txtChannelName" change="{_isDirty = true}" text="@{_channel.name}" />
+		</s:BorderContainer>
+		
+		<s:Line width="95%" >
+			<s:stroke>
+				<s:SolidColorStroke color="#3E63C1" weight="2" />
+			</s:stroke>				
+		</s:Line>	
+		
+		<s:BorderContainer styleName="Main" width="100%" height="100%">
+			<mx:LinkBar id="linkBar" x="2" y="2" dataProvider="{vsMedia}" selectedIndex="0" styleName="NoText"
+						itemClick="linkBar_itemClickHandler(event)"  />
+
+			<components:SearchBox id="searchBox" right="55" top="35" left="5"/>
+			<components:TextSortButton top="35" right="5" id="btnSort"  toolTip="Sort media by name" />
+			<components:FilterButton right="30" top="35" id="btnFilter" enabled="{vsMedia.selectedIndex == 0}" />
+			<s:PopUpAnchor right="52" top="57" id="popUpTypes" displayPopUp="{btnFilter.selected}">
+				<components:SelectMediaTypes id="selectMediaTypes"   />
+			</s:PopUpAnchor>
+			
+			<mx:ViewStack x="0" y="60" id="vsMedia" width="100%" height="100%" creationPolicy="all">
+				<s:NavigatorContent toolTip="Media" label="Media" icon="@Embed(source='/assets/icons/image.png')" width="100%" height="100%" >
+					<s:List id="listMedia" dataProvider="{_medias}" itemRenderer="com.stratoscreen.renderers.DragMediaItem" 
+							dragEnabled="true" allowMultipleSelection="true" left="5" top="5" bottom="5" right="0"  borderVisible="false">
+						<s:layout>
+							<s:VerticalLayout paddingLeft="0" paddingRight="0" paddingTop="0" paddingBottom="5" rowHeight="28" variableRowHeight="false" horizontalAlign="left" gap="2"/>
+						</s:layout>
+					</s:List>
+				</s:NavigatorContent>
+				<s:NavigatorContent toolTip="Media Overlays" label="" width="100%" height="100%" icon="@Embed(source='/assets/icons/image_palette.png')">
+					<s:List id="listMediaOverlays" dataProvider="{_overlays}" itemRenderer="com.stratoscreen.renderers.DragMediaOverlayItem" 
+							dragEnabled="true" allowMultipleSelection="true" left="5" top="5" bottom="5" right="0"  borderVisible="false">
+						<s:layout>
+							<s:VerticalLayout paddingLeft="0" paddingRight="5" paddingTop="0" paddingBottom="0" rowHeight="28" variableRowHeight="false" horizontalAlign="left" gap="2"/>
+						</s:layout>
+					</s:List>
+				</s:NavigatorContent>
+				<s:NavigatorContent toolTip="Media Groups" label="" width="100%" height="100%" icon="@Embed(source='/assets/icons/pictures.png')">
+					<s:List id="listMediaGroup" dataProvider="{_groups}" itemRenderer="com.stratoscreen.renderers.DragMediaGroupItem" 
+							dragEnabled="true" allowMultipleSelection="true" left="5" top="5" bottom="5" right="0"  borderVisible="false">
+						<s:layout>
+							<s:VerticalLayout paddingLeft="0" paddingRight="0" paddingTop="0" paddingBottom="0" rowHeight="28" variableRowHeight="false" horizontalAlign="left" gap="2"/>
+						</s:layout>
+					</s:List>
+				</s:NavigatorContent>
+				<s:NavigatorContent toolTip="Media Group Overlays" label="" width="100%" height="100%" icon="@Embed(source='/assets/icons/pictures_palette.png')">
+					<s:List id="listMediaGroupOverlays" dataProvider="{_mediaGroupOverlays}" itemRenderer="com.stratoscreen.renderers.DragMediaGroupOverlayItem" 
+							dragEnabled="true" allowMultipleSelection="true" left="5" top="5" bottom="5" right="0"  borderVisible="false">
+						<s:layout>
+							<s:VerticalLayout paddingLeft="0" paddingRight="5" paddingTop="0" paddingBottom="0" rowHeight="28" variableRowHeight="false" horizontalAlign="left" gap="2"/>
+						</s:layout>
+					</s:List>
+				</s:NavigatorContent>				
+				<s:NavigatorContent toolTip="Channel Overlays" label="" width="100%" height="100%" icon="@Embed(source='/assets/icons/film_palette.png')">
+					<s:List id="listChannelOverlays" dataProvider="{_channelOverlays}" itemRenderer="com.stratoscreen.renderers.DragChannelOverlayItem" 
+							dragEnabled="true" allowMultipleSelection="true" left="5" top="5" bottom="5" right="0"  borderVisible="false">
+						<s:layout>
+							<s:VerticalLayout paddingLeft="0" paddingRight="5" paddingTop="0" paddingBottom="0" rowHeight="28" variableRowHeight="false" horizontalAlign="left" gap="2"/>
+						</s:layout>
+					</s:List>
+				</s:NavigatorContent>
+
+			</mx:ViewStack>
+		</s:BorderContainer>
+	</s:VGroup>
+	
+	<s:VGroup id="groupMiddle" left="288" top="5" bottom="5" right="213">
+		<mx:DividedBox width="100%" height="100%">			
+			<s:BorderContainer styleName="Main" width="100%" height="100%" minHeight="128">
+				<s:Label text="Media Items" left="5" top="5" fontWeight="bold"/>
+				<s:List id="listGroup"  
+						dragEnabled="true" dropEnabled="true" dragMoveEnabled="true" dragDrop="{_isDirty = true}" dragEnter="listGroup_dragEnterHandler(event)" 
+						dataProvider="{_details}" itemRenderer="com.stratoscreen.renderers.ChannelDetailItem" borderVisible="false" left="4" top="14" bottom="14" right="2">
+					<s:layout>
+						<s:TileLayout orientation="rows"/>
+					</s:layout>
+				</s:List>					
+			</s:BorderContainer>
+			<s:BorderContainer styleName="Main" width="100%" height="33%" minHeight="135" >
+				<s:Label text="Background Audio" left="5" top="5" fontWeight="bold"/>
+				<s:List id="listAudio" 
+						dragEnabled="true" dropEnabled="true" dragMoveEnabled="true" dragDrop="{_isDirty = true}" 
+						dataProvider="{_audioDetails}" itemRenderer="com.stratoscreen.renderers.ChannelDetailItem" borderVisible="false" left="4" top="20" bottom="14" right="2"  dragEnter="listAudio_dragEnterHandler(event)">
+					<s:layout>
+						<s:TileLayout orientation="rows"/>
+					</s:layout>
+				</s:List>														
+			</s:BorderContainer>	
+			<s:BorderContainer styleName="Main" width="100%" height="128" minHeight="125" >
+				<s:Label text="Channel Overlays" left="5" top="5" fontWeight="bold"/>
+				<s:List id="listOverlays" 
+						dragEnabled="true" dropEnabled="true" dragMoveEnabled="true" dragDrop="{_isDirty = true}" 
+						dataProvider="{_overlayDetails}" itemRenderer="com.stratoscreen.renderers.ChannelOverlayItem" 
+						borderVisible="false" left="4" top="20" bottom="14" right="2"  dragEnter="listChannelOverlays_dragEnterHandler(event)">
+					<s:layout>
+						<s:TileLayout orientation="rows"/>
+					</s:layout>
+				</s:List>														
+			</s:BorderContainer>	
+		</mx:DividedBox>
+	</s:VGroup>
+	
+	<s:VGroup id="groupRight" width="200" right="5" top="5" height="100%" horizontalAlign="right" gap="0">
+		<s:BorderContainer styleName="Main" width="100%" height="75" id="borderSelected">
+			<s:Label text="Selected Item" fontWeight="bold" x="5" top="5"/>
+			<s:Label x="10" y="24" text="Name" fontWeight="normal"/>
+			<s:Label x="50" y="24" text="{_selectedItem.name}" width="145" maxDisplayedLines="1"/>
+			<s:Label x="8" y="41" text="Order" fontWeight="normal" height="22"/>
+			<s:NumericStepper x="50" y="40" minimum="1" stepSize="1" id="stepOrder" change="stepOrder_changeHandler(event)"/>
+		</s:BorderContainer>
+		
+		<mx:Spacer height="{borderDuration.visible ? HEIGHT_SPACER : 0}"/>		
+		<s:BorderContainer styleName="Main" width="100%" height="77" id="borderDuration">
+			<s:Label text="Duration" fontWeight="bold" x="5" top="5"/>
+			<components:Duration id="mediaDuration" x="10" y="18" click="{_isDirty = true}"/>
+			<mx:ViewStack id="vsOptions" x="10" y="48" width="100%" height="22" creationPolicy="all">
+				<s:NavigatorContent label="View 1" width="100%" height="100%">
+					<s:CheckBox x="0" y="2" label="Play to end" id="chkToEnd" change="chkToEnd_changeHandler(event)"/>
+				</s:NavigatorContent>
+				<s:NavigatorContent>
+					<s:CheckBox x="0" y="2" label="Play to Frame" id="chkToFrame" change="chkToFrame_changeHandler(event)"/>
+					<s:TextInput id="txtToFrame" text="@{_selectedItem.frames}" x="94" y="2" restrict="0-9" width="64" enabled="{chkToFrame.selected}" change="{_isDirty = true}"/>
+				</s:NavigatorContent>
+			</mx:ViewStack>							
+		</s:BorderContainer>		
+
+		<mx:Spacer height="{borderEffects.visible ? HEIGHT_SPACER : 0}" />
+		<s:BorderContainer id="borderEffects" styleName="Main" width="100%"  height="28" >
+			<s:Label text="Transition" fontWeight="bold" x="5" verticalCenter="0"/>
+			<s:DropDownList id="ddEffect" dataProvider="{EffectsManager.effectsList}" verticalCenter="0" left="65" right="5" change="ddEffect_changeHandler(event)"/>
+		</s:BorderContainer>
+
+		<mx:Spacer height="{borderStream.visible ? HEIGHT_SPACER : 0}" />
+		<s:BorderContainer id="borderStream" styleName="Main" width="100%"  height="28" >
+			<s:Label text="Stream Media" fontWeight="bold" x="5" verticalCenter="0"/>			
+			<s:CheckBox x="91" y="4" id="chkStream" click="chkStream_clickHandler(event)"/>
+		</s:BorderContainer>
+
+		<mx:Spacer height="{borderGroup.visible ? HEIGHT_SPACER : 0}"  />
+		<s:BorderContainer styleName="Main" width="100%" height="77" id="borderGroup">
+			<s:Label text="Group Options" fontWeight="bold" x="5" top="5"/>
+			<s:Label x="10" y="20" text="Play Count" height="18"/>
+			<s:NumericStepper x="75" y="19" width="56" id="stepPlayCount" minimum="1" enabled="{!chkPlayAll.selected}"  change="stepPlayCount_changeHandler(event)"/>
+			<s:CheckBox x="139" y="22" label="Play all" id="chkPlayAll" click="chkPlayAll_clickHandler(event)"/>
+			<s:Label x="10" y="47" text="Type" height="22"/>
+			<s:DropDownList x="75" y="47" id="ddGroupType"  change="ddGroupType_changeHandler(event)">
+				<s:dataProvider>
+					<s:ArrayCollection>
+						<fx:Object label="Sequential" value="{Constants.GROUP_TYPE_SEQUENCE}"  />
+						<fx:Object label="Random" value="{Constants.GROUP_TYPE_RANDOM}" />
+					</s:ArrayCollection>
+				</s:dataProvider>
+			</s:DropDownList>
+		</s:BorderContainer>	
+
+		<mx:Spacer height="{borderPlayTimes.visible ? HEIGHT_SPACER : 0}" />
+		<s:BorderContainer styleName="Main" width="100%" id="borderPlayTimes" height="104">
+			<s:Label text="Play Times" fontWeight="bold" x="5" top="5"/>
+			<s:CheckBox x="10" y="24" label="Play any time" id="chkPlayTimes" selected="true" click="chkPlayTimes_clickHandler(event)"/>
+			<mx:DataGrid id="gridTimes" left="10" top="45" right="5" bottom="5" showHeaders="false" rowHeight="24"
+						 dataProvider="{_playTimes}" rowCount="{_playTimes.length}" editable="true"  
+						 itemEditEnd="gridTimes_itemEditEndHandler(event)" itemClick="gridTimes_itemClickHandler(event)" >
+				<mx:columns>
+					<mx:DataGridColumn dataField="startTime" />
+					<mx:DataGridColumn dataField="endTime" />
+					<mx:DataGridColumn itemRenderer="com.stratoscreen.renderers.UpdateRow" width="24" editable="false"/>
+				</mx:columns>
+			</mx:DataGrid>			
+		</s:BorderContainer>
+		
+		<mx:Spacer height="100%" />
+		<s:Button label="Save" bottom="10" right="5" id="btnSave" enabled="{_isDirty}" click="btnSave_clickHandler(event)"/>
+		<mx:Spacer height="5" />
+	</s:VGroup>	
+
+	
+	<s:BorderContainer id="borderThumb" dropShadowVisible="true" y="325" >
+		<mx:Image id="imgThumb" scaleContent="true" maintainAspectRatio="true" />	
+	</s:BorderContainer>
+
+	<s:controlBarContent>			
+	</s:controlBarContent>
+</s:TitleWindow>
