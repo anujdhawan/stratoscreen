@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="468" height="300" creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.controller.AccountControl;
+			import com.stratoscreen.controller.InstallControl;
+			import com.stratoscreen.controller.UninstallControl;
+			import com.stratoscreen.events.InstallEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Accounts;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+
+			public static const ACCOUNT_ADD:String = "ACCOUNT_ADD";
+			public static const ACCOUNT_DELETE:String = "ACCOUNT_DELETE";
+			public static const ACCOUNT_UPDATE:String = "ACCOUNT_UPDATE";
+			public static const INSTALL:String = "INSTALL";
+			public static const UNINSTALL:String = "UNINSTALL";
+
+			public var action:String;
+			public var account:Accounts;
+			public var accountUsers:Array;
+			public var accountHdrs:Array;
+
+			private var _appManager:AppManager;
+			private var _success:Boolean = false;
+			private var _install:InstallControl;
+			private var _uninstall:UninstallControl;
+			private var _accountControl:AccountControl;
+			private var _lastMessage:String;
+			
+			[Bindable] private var _setupMessages:ArrayCollection;
+
+			public function get success():Boolean
+			{
+				return _success;	
+			}
+			
+			public function get lastMessage():String
+			{
+				return _lastMessage;
+			}
+			
+			public function get webBucket():String
+			{
+				if (_install != null)
+				{
+					return _install.webBucket;
+				}
+				
+				return "";
+			}			
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				// Find the Application Manager in the parent application
+				_appManager = this.parentApplication.appManager;
+				
+				this.closeButton.visible = false;
+				PopUpManager.centerPopUp(this);
+				
+				_setupMessages = new ArrayCollection();					
+				switch (this.action)
+				{
+					case ACCOUNT_ADD:
+						startAddAccount();
+						break;
+
+					case ACCOUNT_DELETE:
+						startDeleteAccount();
+						break;
+
+					case ACCOUNT_UPDATE:
+						startUpdateAccount();
+						break;
+
+					case INSTALL:
+						startInstall();
+						break;
+
+					case UNINSTALL:
+						startUninstall()
+						break;
+				}
+			}
+
+			public function startAddAccount():void
+			{
+				this.title = "Creating new account"; 
+				_accountControl = new AccountControl(_appManager);
+				_accountControl.addEventListener(InstallEvent.SETUP_EVENT, setupEventHandler);
+				_accountControl.addAccount(account, accountUsers);				
+			}
+
+			public function startUpdateAccount():void
+			{
+				this.title = "Updating account"; 
+				_accountControl = new AccountControl(_appManager);
+				_accountControl.addEventListener(InstallEvent.SETUP_EVENT, setupEventHandler);
+				_accountControl.updateAccount(account, accountUsers);				
+			}
+
+			public function startDeleteAccount():void
+			{
+				this.title = "Deleting account"; 
+				_accountControl = new AccountControl(_appManager);
+				_accountControl.addEventListener(InstallEvent.SETUP_EVENT, setupEventHandler);
+				_accountControl.deleteAccount(account);				
+			}
+
+			public function startInstall():void
+			{
+				this.title = "Installing main service"; 
+				_install = new InstallControl(_appManager);
+				_install.addEventListener(InstallEvent.SETUP_EVENT, setupEventHandler);
+				_install.start();				
+			}
+
+			public function startUninstall():void
+			{
+				this.title = "Uninstalling main service"; 
+				_uninstall = new UninstallControl(_appManager);
+				_uninstall.addEventListener(InstallEvent.SETUP_EVENT, setupEventHandler);
+				_uninstall.start();
+			}
+
+			private function setupEventHandler(event:InstallEvent):void
+			{
+				// Append the results to the setup messages for the datagrid	
+				// Create a simple object to append 
+				var item:Object = new Object();
+				item.status = event.status;
+				item.message = event.message;
+				
+				_setupMessages.addItemAt(item, 0);
+				
+				// Watch for a stop in processing
+				if (event.status == InstallEvent.COMPLETE || event.status == InstallEvent.ERROR)
+				{
+					_success = event.status == InstallEvent.COMPLETE;
+					_lastMessage = event.message;
+					
+					if (_accountControl != null)
+					{
+						this.accountHdrs = _accountControl.accounts;	
+					}					
+					closeHandler();
+					return;
+				}
+				
+				switch (this.action)
+				{
+					case ACCOUNT_ADD:
+						barProgress.setProgress(_accountControl.percentComplete, 1);;
+						break;
+
+					case INSTALL:
+						barProgress.setProgress(_install.percentComplete, 1);;
+						break;
+					
+					case UNINSTALL:
+						barProgress.setProgress(_uninstall.percentComplete, 1);;
+						break;
+					
+				}
+				
+			}
+			
+			private function closeHandler(event:CloseEvent = null):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				
+				PopUpManager.removePopUp(this);
+			}
+
+			
+		]]>
+	</fx:Script>
+	<s:controlBarContent>
+		<mx:ProgressBar labelPlacement="center" color="#202020" id="barProgress" label="" width="100%" x="10" height="10" mode="manual"/>
+	
+	</s:controlBarContent>
+	<mx:DataGrid left="10" top="10" bottom="10" right="10" id="gridMessages" dataProvider="{_setupMessages}" showHeaders="false" fontSize="11">
+		<mx:columns>
+			<mx:DataGridColumn headerText="" dataField="message"/>
+		</mx:columns>
+	</mx:DataGrid>
+</s:TitleWindow>

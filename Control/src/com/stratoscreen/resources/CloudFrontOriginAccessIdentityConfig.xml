@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CloudFrontOriginAccessIdentityConfig xmlns="http://cloudfront.amazonaws.com/doc/2010-11-01/">
+  <CallerReference>@@REF@@</CallerReference>  
+  <Comment>@@COMMENT@@</Comment> 
+</CloudFrontOriginAccessIdentityConfig>

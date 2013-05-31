@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="342" height="74" title="Connecting to AWS" 
+			   creationComplete="creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[			
+			import com.stratoscreen.aws.IAMEvent;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.SharedKeys;
+			import com.stratoscreen.model.domains.*;
+			import com.stratoscreen.utils.LogUtils;
+			import com.stratoscreen.utils.SharedUtils;
+			import com.stratoscreen.utils.XMLUtils;
+			
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+
+			private var _appManager:AppManager;
+			private var _isInstalled:Boolean = false;
+			private var _webBucket:String;
+			private var _accounts:Array;
+			
+			public function get success():Boolean
+			{
+				return 	_isInstalled;
+			}			
+			
+			public function get webBucket():String
+			{
+				return _webBucket;
+			}
+			
+			public function get accounts():Array
+			{
+				return _accounts;
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				this.closeButton.visible = false;
+				PopUpManager.centerPopUp(this);
+				_appManager = this.parentApplication.appManager;
+				
+				// Validate the keys before we start 
+				_appManager.iam.validateKeys(validateKeysHandler);
+			}
+			
+			private function validateKeysHandler(event:IAMEvent):void
+			{				
+				// Get the information about this account from the server
+				_appManager.sdb.select("Select * from Settings", settingsQueryHandler, Settings);				
+			}
+			
+			private function settingsQueryHandler(event:SDBEvent):void
+			{
+				if (event.result == null) 
+				{
+					closeHandler();
+					return;
+				}
+
+				if (event.result.length == 0) 
+				{
+					closeHandler();
+					return;
+				}
+
+				// If the domain is not found we are not installed
+				if (event.code == "NoSuchDomain") 
+				{
+					closeHandler();
+					return;
+				}
+				
+				
+				// Save the results
+				try
+				{
+					// Assume we have one row
+					_appManager.settings = event.result[0];
+				}
+				catch (err:Error)
+				{
+					LogUtils.writeErrorToLog(err);	
+					closeHandler();
+					return;
+				}
+
+				_isInstalled = true;
+				var sql:String = "Select * from Accounts where name is not null order by name"
+				_appManager.sdb.select(sql, accountsQueryHandler, Accounts);
+			}
+			
+			private function accountsQueryHandler(event:SDBEvent):void
+			{
+				if (event.result == null) {closeHandler();}
+				
+				_accounts = event.result as Array;
+				closeHandler();
+			}
+			
+			private function closeHandler(event:CloseEvent = null):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+			
+
+		]]>
+	</fx:Script>
+	<s:TextArea y="10" height="29" borderVisible="false" text="Querying Amazon Web Services for your account" left="10" right="10" textAlign="center"/>
+</s:TitleWindow>

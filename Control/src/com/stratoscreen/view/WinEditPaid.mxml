@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+			   xmlns:s="library://ns.adobe.com/flex/spark"
+			   xmlns:mx="library://ns.adobe.com/flex/mx"
+			   borderVisible="true" close="this_closeHandler(event)"
+			   creationComplete="this_creationCompleteHandler(event)" title="Edit Paid Screens ">
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.model.BillingRow;
+			import com.stratoscreen.utils.Utils;
+			
+			import mx.collections.ArrayCollection;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.managers.PopUpManager;
+			
+			import spark.events.GridSelectionEvent;
+			
+			[Bindable] private var _billingArray:ArrayCollection;
+			private var _success:Boolean = false;
+			
+			public function get success():Boolean
+			{
+				return _success;
+			}
+			
+			public function get billingArray():Array
+			{
+				// Return a new array without the deleted items
+				var array:Array = new Array();
+				
+				for each (var row:BillingRow in _billingArray)
+				{
+					array.push(row);
+				}
+				
+				return array;
+			}
+
+			public function set billingArray(value:Array):void
+			{
+				_billingArray = new ArrayCollection(value);
+				_billingArray.filterFunction = filterDeleted;
+				_billingArray.refresh();
+			}
+
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);				
+			}
+			
+			protected function this_closeHandler(event:CloseEvent):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+			
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				_success = true;
+				this_closeHandler(null);
+			}
+			
+			protected function btnAdd_clickHandler(event:MouseEvent):void
+			{
+				_billingArray.addItem(new BillingRow());
+			}
+			
+			protected function grid_selectionChangeHandler(event:GridSelectionEvent):void
+			{
+				// TODO Auto-generated method stub
+				
+			}
+			
+			private function filterDeleted(item:Object):Boolean
+			{
+				return !item.deleted;
+			}
+		]]>
+	</fx:Script>
+	<s:layout>
+		<s:VerticalLayout paddingBottom="10" paddingLeft="10"
+						  paddingRight="10" paddingTop="10"/>
+	</s:layout>
+
+	<s:Button id="btnAdd" label="Add" click="btnAdd_clickHandler(event)" />
+	<s:DataGrid id="grid" dataProvider="{_billingArray}" editable="true" width="100%"
+				selectionChange="grid_selectionChangeHandler(event)">
+		<s:columns>
+			<s:ArrayList>
+				<s:GridColumn dataField="screenCount" headerText="License Count" width="100"  />
+				<s:GridColumn dataField="subscriptionId" headerText="Billing Reference" minWidth="250" />
+				<s:GridColumn headerText="Delete"  itemRenderer="com.stratoscreen.view.DeleteBillingItem"
+							   editable="false" resizable="false" sortable="false" width="60"></s:GridColumn>
+			</s:ArrayList>
+		</s:columns>
+	</s:DataGrid>
+	
+	<s:HGroup width="100%" horizontalAlign="right">
+		<s:Button id="btnSave" label="Save" click="btnSave_clickHandler(event)"/>	
+	</s:HGroup>
+	
+</s:TitleWindow>

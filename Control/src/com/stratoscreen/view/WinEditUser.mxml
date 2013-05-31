@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009"   xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx" width="444" height="262" 
+			   creationComplete="creationCompleteHandler(event)" close="closeHandler(event)">
+	<s:layout>
+		<s:BasicLayout/>
+	</s:layout>
+	<fx:Declarations>
+		<mx:EmailValidator id="validEmail" source="{txtUserEmail}" property="text" />
+		<mx:StringValidator id="validPassword" source="{txtPassword}" property="text" minLength="{Constants.MINIMUM_PASSWORD_LENGTH}" />
+		<mx:StringValidator id="validFirstName" source="{txtFirstName}" property="text"/>
+		<mx:StringValidator id="validLastName" source="{txtLastName}" property="text"/>
+
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.model.domains.Users;
+			
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			import mx.events.ValidationResultEvent;
+			import mx.managers.PopUpManager;
+			import mx.utils.StringUtil;
+						
+			[Bindable] public var user:Users;
+			public var allEmails:Array;
+			
+			private var _isDirty:Boolean = false;
+			private var _canceled:Boolean = true;
+
+			public function get canceled():Boolean
+			{
+				return _canceled;
+			}
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				PopUpManager.centerPopUp(this);
+
+				if (user.newUser) 
+				{
+					btnDelete.visible = false;
+					btnSave.label = "Save";
+					this.title = "Create user";
+					chkShowPwd.selected = true;	// Default to showing password on new user
+					// Default to a user
+					user.type = Constants.USER_TYPE_USER;					
+					ddUserType.selectedIndex = 1;
+				}
+				else
+				{
+					this.title = "Update user";
+					btnSave.label = "Update";
+					btnDelete.visible = true;
+					
+					// Update the drop down box
+					ddUserType.selectedIndex = (user.type == Constants.USER_TYPE_MANAGER) ? 0 : 1;
+				}								
+			}
+
+			protected function closeHandler(event:CloseEvent):void
+			{
+				if (event == null) {this.dispatchEvent(new CloseEvent(CloseEvent.CLOSE));}
+				PopUpManager.removePopUp(this);
+			}
+
+
+			protected function btnSave_clickHandler(event:MouseEvent):void
+			{
+				user.email = StringUtil.trim(user.email.toLowerCase());
+				user.type = ddUserType.selectedItem.value;
+				user.updated = true;
+
+				if (!validateUser()) {return;}				
+				
+				_isDirty = false;
+				_canceled = false;
+				closeHandler(null);
+			}
+			
+			private function validateUser():Boolean
+			{
+				txtUserEmail.errorString = "";
+				
+				var result:ValidationResultEvent = validEmail.validate();
+				if (result.results != null)  {return false;}
+
+				result = validPassword.validate();
+				if (result.results != null)  {return false;}
+
+				result = validFirstName.validate();
+				if (result.results != null)  {return false;}
+
+				result = validLastName.validate();
+				if (result.results != null)  {return false;}
+				
+				// Loop through twice and find dups
+				for (var i:int = 0; i < allEmails.length; i++)
+				{
+					if (user.itemName != allEmails[i].itemName)
+					{
+						var testEmail:String = txtUserEmail.text;
+						testEmail = StringUtil.trim(testEmail.toLowerCase());						
+						if ( testEmail == StringUtil.trim(allEmails[i].email.toLowerCase()))
+						{
+							txtUserEmail.errorString = user.email + " is already associated with another account.";
+							return false;							
+						}						
+					}
+				}
+
+				return true;
+			}
+
+
+
+			protected function btnDelete_clickHandler(event:MouseEvent):void
+			{
+				user.deleted = true;
+				_canceled = false;
+				closeHandler(null);
+			}
+
+			
+		]]>
+	</fx:Script>
+	<s:Label x="11" y="17" text="Type" fontWeight="bold"/>
+	<s:DropDownList x="113" y="10" id="ddUserType" change="{_isDirty=true}" width="317" >
+		<s:dataProvider>
+			<s:ArrayCollection>
+				<fx:Object label="Manager" value="{Constants.USER_TYPE_MANAGER}" />
+				<fx:Object label="User" value="{Constants.USER_TYPE_USER}" />
+			</s:ArrayCollection>
+		</s:dataProvider>
+	</s:DropDownList>
+	<s:Label x="10" y="37" text="Email" height="24" fontWeight="bold"/>
+	<s:TextInput x="113" y="39" width="317" id="txtUserEmail" text="@{user.email}" change="{_isDirty=true}" typographicCase="lowercase"/>
+	<s:Label x="10" y="65" text="Password" fontWeight="bold" height="14"/>
+	<s:TextInput x="113" y="63" width="317" id="txtPassword" displayAsPassword="{!chkShowPwd.selected}" text="@{user.decryptedPassword}" change="{_isDirty=true}"/>
+	<s:TextInput x="114" y="115" width="316" text="@{user.firstName}" change="{_isDirty=true}" id="txtFirstName"/>
+	<s:Label x="10" y="115" text="First Name" fontWeight="bold" height="21"/>
+	<s:TextInput x="114" y="143" width="316" text="@{user.lastName}" change="{_isDirty=true}" id="txtLastName"/>
+	<s:Label x="10" y="140" text="Last Name" fontWeight="bold" height="23"/>
+	<s:Button id="btnSave" click="btnSave_clickHandler(event)" label="Update" right="10" bottom="10"/>
+	<s:CheckBox x="113" y="90" label="Show Password" id="chkShowPwd" fontStyle="italic"/>
+	<s:Button id="btnDelete" click="btnDelete_clickHandler(event)"  label="Delete" right="100" bottom="10"/>
+</s:TitleWindow>

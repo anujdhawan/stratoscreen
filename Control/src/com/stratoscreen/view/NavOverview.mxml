@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:NavigatorContent xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:s="library://ns.adobe.com/flex/spark" 
+					xmlns:mx="library://ns.adobe.com/flex/mx" width="100%" height="100%" maxHeight="800" 
+					creationComplete="creationCompleteHandler(event)" >
+	<fx:Declarations>
+		<mx:EmailValidator id="validEmail" source="{lblEmail}" property="text" />
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.Constants;
+			import com.stratoscreen.aws.AWSEndpoint;
+			import com.stratoscreen.aws.AWSRegions;
+			import com.stratoscreen.aws.SDBEvent;
+			import com.stratoscreen.aws.SESClass;
+			import com.stratoscreen.aws.SESEvent;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.model.domains.Accounts;
+			import com.stratoscreen.model.views.CountRows;
+			
+			import mx.controls.Alert;
+			import mx.events.FlexEvent;
+			import mx.events.ValidationResultEvent;
+			
+			import spark.events.TextOperationEvent;
+
+			private var _appManager:AppManager;
+			
+			protected function creationCompleteHandler(event:FlexEvent):void
+			{
+				_appManager = this.parentApplication.appManager;
+			}
+
+			protected function lblUninstall_clickHandler(event:MouseEvent):void
+			{
+				NavHome(this.parentDocument).vsMain.selectedChild =	NavHome(this.parentDocument).navUninstall;
+			}
+
+			public function updateFields():void
+			{				
+				// Everything loaded OK. Load the fields
+				var emailSet:Boolean = true;
+				var email:String = _appManager.settings.email;
+				if (email == null || email == "") 
+				{
+					email = "not set";
+					emailSet = false;
+				}
+				
+				lblEmail.text = email;
+				lblVerify.visible = false;
+				
+				// Query the Email service and see if the
+				if (emailSet)
+				{
+					_appManager.ses.listVerfied(listVerifiedHandler);
+				}
+				
+				// Set the name for the service too
+				if (_appManager.settings.name == null || _appManager.settings.name == "")
+				{
+					lblName.text = "not set";
+				}
+				else
+				{
+					lblName.text = _appManager.settings.name;
+				}
+				
+				var endpoint:AWSEndpoint = AWSRegions.getAWSEndpoint(_appManager.regionId);
+				txtRegion.text = endpoint.name;
+				txtURL.text = "https://" + endpoint.s3 + "/" +  _appManager.accountBucket + "/";				
+				
+				// Load the totals for the users
+				// Load other information about the account
+				var sql:String = "Select count(*) from Accounts";
+				_appManager.sdb.select(sql, queryAccountCountHandler, CountRows);				
+
+				sql = "Select count(*) from Users where type='" + Constants.USER_TYPE_MANAGER + "'";
+				_appManager.sdb.select(sql, queryMgrCountHandler, CountRows);				
+				
+				sql = "Select count(*) from Users where type='" + Constants.USER_TYPE_USER + "'";
+				_appManager.sdb.select(sql, queryUserCountHandler, CountRows);	
+				
+				sql = "Select * from Accounts where itemName()='" + _appManager.settings.contentAccountId + "'";
+				_appManager.sdb.select(sql, queryContentAccountHandler, Accounts);
+			}
+			
+			private function listVerifiedHandler(event:SESEvent):void
+			{
+				var result:Array = SESClass.verifiedListToArray(event.result);
+				
+				// Loop through and look for a match
+				var emailFound:Boolean = false;
+				for (var i:int = 0; i < result.length; i++)
+				{
+					if (lblEmail.text.toLowerCase() == result[i].toLowerCase())
+					{
+						emailFound = true;
+						break;
+					}
+				}
+				
+				lblVerify.visible = !emailFound;
+			}
+			
+			private function queryAccountCountHandler(event:SDBEvent):void
+			{
+				txtAccounts.text = event.result[0].Count;
+			}	
+			
+			private function queryMgrCountHandler(event:SDBEvent):void
+			{
+				txtManagers.text = event.result[0].Count;
+			}	
+			
+			private function queryUserCountHandler(event:SDBEvent):void
+			{
+				txtUsers.text = event.result[0].Count;
+			}	
+			
+			private function queryContentAccountHandler(event:SDBEvent):void
+			{
+				if (event.result.length == 0)
+				{
+					lblContentAcct.text = "Not set";
+				}
+				else
+				{
+					lblContentAcct.text = event.result[0].name;	
+				}				
+			}
+			
+			protected function lblVerify_clickHandler(event:MouseEvent):void
+			{
+				_appManager.ses.verifyEmailAddress(lblEmail.text, verifyEmailHandler);
+			}
+			
+			private function verifyEmailHandler(event:SESEvent):void
+			{
+				var msg:String;
+				if (event.success)
+				{
+					msg = "A verfication email has been sent to " + lblEmail.text + ". ";
+					lblVerify.visible = false;
+				}
+				else
+				{
+					msg = "An error occured while sending the verification email. Please try again later";
+				}
+				
+				Alert.show(msg, "Email Verification");				
+			}
+			
+
+			
+			private function  updateSettingsHandler(event:SDBEvent):void
+			{
+				this.enabled = true;
+				_appManager.settings.updated = false;
+			}
+
+			protected function btnChange_clickHandler(event:MouseEvent):void
+			{
+				NavHome(this.parentDocument).vsMain.selectedChild =	NavHome(this.parentDocument).navSetEmail;
+			}
+
+
+			protected function btnChangeName_clickHandler(event:MouseEvent):void
+			{
+				NavHome(this.parentDocument).vsMain.selectedChild =	NavHome(this.parentDocument).navSetName;
+			}
+
+		]]>
+	</fx:Script>
+
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<s:Group height="100%" width="100%">
+		<s:TextArea heightInLines="NaN" width="100%" styleName="Header" fontWeight="bold">
+			<s:text>
+				Overview of your StratoScreen installation.
+			</s:text>
+		</s:TextArea>
+		<s:Label x="10" y="40" text="Software Statistics" fontWeight="bold"/>
+		<s:Label x="15" y="58" text="Region"/>
+		<s:Label id="txtRegion" x="108" y="58"/>
+		<s:Label x="15" y="76" text="Web URL"/>
+		<s:Label id="txtURL" x="108" y="76" color="#000080" textDecoration="underline"/>
+		<s:Label x="15" y="94" text="Accounts"/>
+		<s:Label id="txtAccounts" x="108" y="94"/>
+		<s:Label x="15" y="112" text="Managers"/>
+		<s:Label id="txtManagers" x="108" y="112"/>
+		<s:Label x="15" y="130" text="Users"/>
+		<s:Label id="txtUsers" x="108" y="130"/>
+		
+		
+		<s:Label x="7" y="185" text="My Service" fontWeight="bold"/>
+		<s:VGroup x="12" y="208">
+			<s:HGroup verticalAlign="middle" height="18">
+				<s:Label text="Name"  width="100" toolTip="Will display as the provider in Storyboard"/>
+				<s:Label id="lblName" minWidth="100" />		
+				<s:Button label="Change"  id="btnChangeName" click="btnChangeName_clickHandler(event)"  height="16" width="60" styleName="Change"/>
+			</s:HGroup>
+			<s:HGroup  verticalAlign="middle"  height="18">
+				<s:Label text="Email" width="100" />
+				<s:Label id="lblEmail" minWidth="100"/>
+				<s:Button label="Change"  id="btnChange" click="btnChange_clickHandler(event)" height="16" width="60" fontFamily="Arial" fontSize="8"/>
+				<mx:Spacer width="10" />
+				<s:Label text="Resend email verification" id="lblVerify" textDecoration="underline" click="lblVerify_clickHandler(event)" />
+			</s:HGroup>
+			<s:HGroup verticalAlign="middle"  height="18">
+				<s:Label text="Content Account"  width="100"/>
+				<s:Label id="lblContentAcct" />				
+			</s:HGroup>
+		</s:VGroup>
+		
+
+			
+		
+		<s:Label x="10" y="316" text="Delete my service" id="lblUninstall" click="lblUninstall_clickHandler(event)"/>
+
+	</s:Group>
+</s:NavigatorContent>
