@@ -1,3 +1,4 @@
+#summary Setting up Flash Builder Environment.
 =Setting up Flash Builder Environment=
 
 Your Flash Builder workspace must have a Linked Resource (${STRATO_CORE_AIR}) so the project can compile. 
