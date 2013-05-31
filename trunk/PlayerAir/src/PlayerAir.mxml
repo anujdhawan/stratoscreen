@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009"  xmlns:s="library://ns.adobe.com/flex/spark" 
+					   xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:view="com.stratoscreen.view.*"
+					   skinClass="com.stratoscreen.skins.StageVideoSkin" currentState="splash" minHeight="450" minWidth="800" 					   
+					   preinitialize="this_preinitializeHandler(event)" creationComplete="this_creationCompleteHandler(event)" 
+					   addedToStage="this_addedToStageHandler(event)" backgroundColor="0x000000"  >
+	<fx:Style source="/assets/css/style.css"/>
+	<fx:Script>
+		<![CDATA[
+			import com.stratoscreen.controller.BandwidthMonitor;
+			import com.stratoscreen.controls.AlertWindow;
+			import com.stratoscreen.managers.AppManager;
+			import com.stratoscreen.managers.DataManager;
+			import com.stratoscreen.managers.TaskManager;
+			import com.stratoscreen.model.domains.Screens;
+			import com.stratoscreen.skins.MenuButton;
+			
+			import mx.events.CloseEvent;
+			import mx.events.EffectEvent;
+			import mx.events.FlexEvent;
+			
+			import spark.events.PopUpEvent;
+			
+			private var _appManager:AppManager;
+			private var _dataManager:DataManager;
+			private var _taskManager:TaskManager;
+			private var _interuptTimer:Timer;
+			private var _selectedButton:int = 0;
+			private var _alertStop:AlertWindow;
+			
+			private const INTERUPT_THRESHOLD:int = 5;
+			private const THIS_TYPE:String = Screens.DEVICE_PC;
+			
+			public function get deviceType():String
+			{
+				return THIS_TYPE;
+			}
+			
+			public function get appManager():AppManager
+			{
+				return _appManager;
+			}
+			
+			public function get dataManager():DataManager
+			{
+				return _dataManager;
+			}
+			
+			public function get taskManager():TaskManager
+			{
+				return _taskManager;
+			}
+			
+			protected function this_preinitializeHandler(event:FlexEvent):void
+			{
+			}			
+			
+			protected function this_addedToStageHandler(event:Event):void
+			{
+				if (!Capabilities.isDebugger)
+				{
+					stage.displayState = StageDisplayState.FULL_SCREEN_INTERACTIVE;
+				}
+			}
+
+			protected function this_creationCompleteHandler(event:FlexEvent):void
+			{
+				// Set the static reference on the required classes
+				AlertWindow.setAppParent(this);
+				
+				// Use a timer to watch for consectutive interupts
+				var interval:int = (INTERUPT_THRESHOLD + 1) * 1000;
+				_interuptTimer = new Timer(interval);
+				_interuptTimer.addEventListener(TimerEvent.TIMER, interuptTimerHandler);
+				
+				NativeApplication.nativeApplication.systemIdleMode = SystemIdleMode.KEEP_AWAKE;
+				NativeApplication.nativeApplication.idleThreshold = INTERUPT_THRESHOLD;
+				NativeApplication.nativeApplication.addEventListener(Event.USER_PRESENT, userPresentHandler);
+				NativeApplication.nativeApplication.addEventListener(Event.USER_IDLE, userIdleHandler);
+				
+				// Show the start splash screen for a few seconds
+				var splashTimer:Timer = new Timer(5000, 1);
+				splashTimer.addEventListener(TimerEvent.TIMER, splashTimerHandler);
+				splashTimer.start();
+			}
+			
+			private function splashTimerHandler(event:TimerEvent):void
+			{
+				this.currentState = "control";
+				playerControl.addEventListener(PlayerControl.CHANNEL_START, startChannelHandler);
+				playerControl.addEventListener(PlayerControl.CHANNEL_STOP, stopChannelHandler);					
+			}
+			
+			/** 
+			 * The entire appwill refer to the parent for the Managers.
+			 *  
+			 * Allow a different process to create the managers
+			 */  
+			public function setManagers(appManager:AppManager, dataManager:DataManager,  taskManager:TaskManager):void
+			{
+				_appManager = appManager;
+				_dataManager = dataManager;
+				_taskManager = taskManager;
+				
+				// We need to track bandwidth usage too
+				BandwidthMonitor.reportFolder = _appManager.reportsFolder();
+			}
+			
+			private function startChannelHandler(event:Event):void
+			{
+				this.currentState = "play";
+				if (playerPlay != null) {playerPlay.play();}
+			}
+			
+			private function stopChannelHandler(event:Event):void
+			{
+				this.currentState = "control";
+				if (playerPlay != null) {playerPlay.stop();}
+			}
+			
+			private function playerPlay_completeHandler(event:Event):void
+			{
+				if (!playerPlay.hasEventListener(PlayerPlay.NO_CHANNEL))
+				{
+					playerPlay.addEventListener(PlayerPlay.NO_CHANNEL, noChannelHandler);
+				}
+				if (!playerPlay.isPlaying) {playerPlay.play();}
+			}
+			
+			private function noChannelHandler(event:Event):void
+			{
+				this.currentState = "control";
+				playerPlay.stop();
+				playerControl.currentState = "menu";
+			}
+
+			protected function btnExit_clickHandler(event:MouseEvent):void
+			{
+				new AlertWindow("Do you want to exit the application?", "Exit Application", true, null, answerExitHandler, true);
+			}
+			
+			private function answerExitHandler(event:PopUpEvent):void
+			{
+				if (event.data == AlertWindow.YES) {NativeApplication.nativeApplication.exit(0);}
+			}
+			
+			protected function stateControl_enterStateHandler(event:FlexEvent):void
+			{
+				Mouse.show();
+				
+			}
+
+			protected function statePlay_enterStateHandler(event:FlexEvent):void
+			{
+				Mouse.hide();
+			}
+			
+			private function userPresentHandler(event:Event):void
+			{
+				trace("user present");
+				if (this.currentState != "play") {return;}
+				
+				// Start the timer. It will be stopped by the idle event
+				_interuptTimer.start();
+			}
+			
+			private function userIdleHandler(event:Event):void
+			{
+				trace("user idle");
+				if (this.currentState != "play") {return;}
+				
+				_interuptTimer.stop();
+				if (_alertStop != null) {_alertStop.close();}
+				Mouse.hide();
+			}
+			
+			private function interuptTimerHandler(event:TimerEvent):void 
+			{
+				_interuptTimer.stop();
+				
+				Mouse.show();
+				
+				if (_alertStop == null) 
+				{
+					_alertStop = new AlertWindow("Would you like to stop the player?", "Stop Player", true, null, answerStopHandler, true);
+				}
+			}
+			
+			private function answerStopHandler(event:PopUpEvent):void
+			{
+				if (event.data == AlertWindow.YES) 
+				{
+					this.currentState = "control";
+					playerPlay.stop();
+					playerControl.currentState = "menu";
+				}
+				else
+				{
+					Mouse.hide();
+				}
+				
+				_alertStop = null;
+			}
+			
+			
+		]]>
+	</fx:Script>	
+	<s:states>
+		<s:State name="splash"/>
+		<s:State name="control" id="stateControl" enterState="stateControl_enterStateHandler(event)"   />
+		<s:State name="play" id="statePlay" enterState="statePlay_enterStateHandler(event)"/>
+	</s:states>
+	<s:Group includeIn="splash" height="100%" width="100%">
+		<s:SWFLoader horizontalCenter="0" source="@Embed('assets/stratoSplashAccel.swf')" verticalCenter="0"/>
+	</s:Group>
+	<s:Group includeIn="control" height="100%" width="100%">
+		<view:PlayerControl id="playerControl"  width="100%" height="100%" visible.play="false" visible.control="true" />
+	</s:Group>
+	<view:PlayerPlay id="playerPlay" includeIn="play" width="100%" height="100%"  creationComplete="playerPlay_completeHandler(event)"  />	
+	<s:Button id="btnExit" right="10" top="10" width="40" label="X" chromeColor="#800000" visible.splash="false" visible.play="false"
+			  click="btnExit_clickHandler(event)" color="#FFFFFF"  fontWeight="bold"/>
+
+</s:WindowedApplication>
